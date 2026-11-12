@@ -5,12 +5,16 @@
 - **适用软件**：Antigravity 桌面端应用（Electron 宿主归档 `/opt/Antigravity/resources/app.asar` + 内嵌 Web UI 的本地引擎 `/opt/Antigravity/resources/bin/language_server`；本地上下文自动压缩预算解锁请参阅配套项目 [`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock) 与命令行版 [`agy-context-unlock`](https://github.com/MatrixC7/agy-context-unlock)）
 - **已验证版本与分支 / Tag 对应**：
   - **`main` 主线**：`antigravity 2.31.0-1` Linux x86-64（`Built at CL: 1017595969`，Electron `44.9.1`），全部 4 处前端补丁采用**结构化唯一签名匹配**（动态解析 Closure Compiler 压缩标识符名，不再因常规符号重命名而中断升级同步，仅在函数真实结构变更时安全中止）
-  - **历史客户端版本 Tag**：若仍停留在旧版 `antigravity 2.29.x`（`CL 1015941558`），请检出对应标签 `git checkout v2.29`（[`v2.29`](https://github.com/MatrixC7/antigravity-uipatch/tree/v2.29)）
+  - **历史客户端版本 Tag**：若仍使用 `antigravity 2.29.x`（`CL 1015941558`），请检出对应标签 `git checkout v2.29`（[`v2.29`](https://github.com/MatrixC7/antigravity-uipatch/tree/v2.29)）
 - **各通道表现与解锁效果**：
   - **企业网关 / 自定义模型通道**（`~/.gemini/config/config.json` 启用 `gateway.enabled: true`，无 Google OAuth 会话）：未修补时 `GetMendelFlags` 返回空表 `{}`，导致受实验开关控制的 `Extensions`、`New Terminal`、V2 多标签右侧栏、Git Diff 审查等 40 余项原生功能全部连带关闭；**应用本工具后，网关模式默认注入实测观测到的 Google 原生账号线上开启基线（41 项布尔开关 + 7 项参数配置），并额外开启 `Settings -> Developer` 面板，支持在可视化界面中对任意开关做双向增减微调、一键重置与跨重装持久化**
   - **Google OAuth 原生通道**：原样保留云端实时下发的完整 Mendel 实验表（实测快照共 384 项），**仅额外确保 `enable-developer-mode` 开启**，允许突破账号灰度限制在 `Settings -> Developer` 面板中自由开启或关闭任意实验特性，并通过 `clientStorageFeature` / `window.nativeStorage` 实时落盘至 `~/.config/Antigravity/app_storage.json`
 - **运行依赖**：仅需 Node.js `>= 18` 标准库（已在 `Node.js v26.13.1` 实测验证；零第三方 npm 依赖，无需外部 `unzip` 或 `@electron/asar` CLI）
 - **许可证**：[MIT License](LICENSE)
+
+> [!IMPORTANT]
+> **`antigravity 2.31` 上游功能移除提示（原生上下文用量指示器 `Context Usage Indicator` 已被编译期剥离）**
+> 在 `antigravity 2.31.0-1` 的外部发行包（`appType: "external"`）中，Google 在编译打包阶段直接将 `buildBindings.contextUsageIndicator`（以及 `codeSearch`、`enhancedFileViewer`）置为了 `void 0`：不仅对应的 React 组件实现代码已被 Closure Compiler Tree-Shake 彻底剔除，设置页过滤逻辑也会将其强制加入 `deniedSettings` 隐藏。因此在 `2.31.0-1` 中即使在 `Developer` 面板开启 `enable-context-usage-indicator`，界面也不会出现该指示器或设置项。**如果你依赖原生的上下文窗口用量指示器，请暂留在 `antigravity 2.29.1-1` 并使用本仓库的 [`v2.29`](https://github.com/MatrixC7/antigravity-uipatch/tree/v2.29) 标签（`git checkout v2.29`）。**
 
 ---
 
@@ -54,7 +58,7 @@
 
 开箱状态下（`0 overrides`），企业网关模式与 Google 原生账号拥有**一致的默认前端功能集**（内置终端 `Terminal`、多标签右侧栏、侧边栏 `Extensions`、Git Diff 审查、PDF / Notebook 预览、分屏、全文搜索、快捷键自定义等全部直接就绪），同时避免误开依赖 Google 内部专有基建或裁剪皮肤的危险开关。在此一致基线之上，你可以随时打开 `Settings -> Developer -> Custom Flags`：
 - **关闭不喜欢的默认项**（如关掉隐藏独立历史列表的 `remove-conversation-history`，或关掉 `enable-aux-pane-redesign` 切回经典常驻四图标栏）—— 面板会清晰标记 `forced off`；
-- **开启原生账号尚未灰度的进阶项**（如添加 `enable-context-usage-indicator`、`enable-bottom-terminal-panel`、`enable-conversation-forking` 等）—— 面板会标记 `forced on`；
+- **开启原生账号尚未灰度的进阶项**（如添加 `enable-bottom-terminal-panel`、`enable-file-explorer-tab`、`enable-conversation-forking`、`markdown-table-v2` 等）—— 面板会标记 `forced on`；
 - **跨重启与重装自动保留，亦可一键重置** —— 修改实时保存在 `~/.config/Antigravity/app_storage.json`，Pacman 重装或升级软件包均不会冲掉；点击右上角 `Reset overrides` 即可随时清空微调，回到纯净的 Google 原生默认状态 + `enable-developer-mode`。
 
 ---
@@ -214,7 +218,7 @@ node --test tests/
 - **内容级配对还原与坏备份隔离重建**：`restore` 在写回备份前验证“对备份重施钩子能否逐字节复现当前 `app.asar`”，防止跨版本误还原导致客户端降级。当已安装归档处于已挂钩（hooked）状态时，备份缺失、损坏或失配均会导致 `install` / `sync` 报错退出（退出码 `3`）；若已安装归档确认为未挂钩的原版（例如刚完成重装）而旧备份损坏，脚本会将坏备份隔离改名为 `app.asar.orig.unusable-<timestamp>`（保留证据）后直接重建新备份，无需重复重装。
 
 ### 已知边界说明
-1. **前端入口解锁不替代云端专有服务**：开启前端实验开关仅解除本地界面门控；部分标记为 Google 内部专用的开关（如 CitC、ABFS、Critique、Google Drive 上传等）因缺少对应云端后端权限，在外部网络下开启后无法实际工作（详见 [《全景目录》第 3.4 节](docs/custom-flags-catalog.md#34-历史列表策略内部专有基建远程通道与裁剪皮肤39-项)）。
+1. **前端入口解锁不替代云端专有服务或已被编译期剥离的组件**：开启前端实验开关仅解除本地界面门控；部分标记为 Google 内部专用的开关（如 CitC、ABFS、Critique、Google Drive 上传等）因缺少云端后端权限无法工作，另有部分组件（如 `2.31.0-1` 外部发行包中的 `enable-context-usage-indicator`、`enable-code-search-palette` 与 `enable-enhanced-file-viewer`）已被上游在打包期置为 `buildBindings: void 0` 并剔除实现代码，开启开关亦不会渲染（详见 [《全景目录》第 1.2 节](docs/custom-flags-catalog.md#12-推荐按需增减的微调清单)与[第 3.4 节](docs/custom-flags-catalog.md#34-历史列表策略内部专有基建远程通道与裁剪皮肤39-项)）。
 2. **请勿在启用状态下直接删除外置 UI 目录**：当 `.desktop` 仍带有 `AGY_UI_BUNDLE` 时，若手动删空 `~/.local/share/antigravity-uipatch`，`language_server` 会因目录缺失返回 `HTTP 500`。清理目录前请务必先运行 `disable` 或 `restore`。
 3. **多 Hook 的执行顺序与还原边界**：本工具采用尾部追加式重打包，因此与其他修改 `app.asar` 的 Hook **在其之后运行**时可无损共存（前序改动全部保留）。但若在本工具之后又有第三方工具改写了别的条目，`restore` 的字节级配对会判定失配并**拒绝还原**（保护行为）——此时请重装 `antigravity` 后再 `install`。
 4. **`verify` 的四态启动器契约与实时进程提示**：`verify` 将启动器严格区分为 `ON`、`OFF`、`UNKNOWN`、`INVALID` 四种状态。当全部资产健康且启动器为有效 `ON`，或启动器被主动停用为明确的 `OFF`（如执行 `disable` 后使用原厂内置 UI，此时不再强制要求已停用的默认外置目录存在）且其余受检项无损坏时，均返回退出码 `0`；而备份缺失/损坏、UI 未打补丁或语法/哈希异常、`CL` 不对齐、启动器缺 `Exec=` / 含不支持的 `env -S` 包装器、或 `ON` 状态下指向缺失目录时，统一返回退出码 `1` 并列出全部问题。注意：启动器为 `ON` 仅代表磁盘配置就绪，若后台已有旧 `language_server` 进程在运行，`live proc` 行会提示重启应用使其生效。

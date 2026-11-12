@@ -30,14 +30,17 @@
 
 ### 1.2 推荐按需增减的微调清单
 
+> [!IMPORTANT]
+> **`2.31.0-1` 重要变动说明（`enable-context-usage-indicator` 等组件在外部发行包中已被编译期剥离）**
+> 在 `antigravity 2.29.1-1` 中可正常使用的原生上下文窗口用量指示器（`enable-context-usage-indicator`），在 `2.31.0-1` 中被上游重命名为 `Context and Quota Indicator`（归属 `Appearance -> Chat Layout`），但 Google 在编译 `2.31.0-1` 外部发行版（`appType: "external"`）时将 `buildBindings.contextUsageIndicator`（连同 `codeSearch`、`enhancedFileViewer`）直接置为了 `void 0`——对应的 React 组件代码已在打包期被 Tree-Shake 剔除，且设置页过滤函数会将其强制拉入 `deniedSettings` 隐藏。因此在 `2.31.0-1` 下开启这几项开关均不会生效；若你依赖原生上下文用量指示器，请使用 `antigravity 2.29.1-1` 搭配本仓库 [`v2.29`](https://github.com/MatrixC7/antigravity-uipatch/tree/v2.29) 标签。
+
 #### 值得手动添加尝鲜的加分项（Google 原生账号与本工具基线默认均关闭）
-- **`enable-context-usage-indicator`**：对话界面原生上下文窗口用量指示器
 - **`enable-bottom-terminal-panel`**：允许将内置终端停靠在底部面板（配合形态 A 使用）
 - **`enable-file-explorer-tab`**：经典四图标栏下的独立文件树图标（配合关闭 `enable-aux-pane-redesign` 的形态 B 使用）
-- **`enable-code-search-palette`**：工作区代码搜索命令面板
 - **`enable-file-viewer-keyboard-navigation`**：原生文件查看器键盘快捷导航
 - **`enable-conversation-forking`** + **`enable-fork-at-historical-step`**：支持从任意历史步骤分叉（Fork）派生新会话
 - **`configure-artifact-width`** / **`markdown-table-v2`**：开放外观设置中的 Artifact 排版宽度调节与新版 Markdown 表格渲染
+- **`enable-browser-element-picker`** / **`enable-composer-connectors`**（`2.31` 新增）：内置浏览器 DOM 元素点选引用与底部输入栏 Connectors 入口
 
 #### 可按个人喜好手动关闭的原生默认项
 - **`remove-conversation-history`**（Google 原生与本工具基线默认开启）：Google 原生账号默认开启该项以隐藏左侧栏扁平历史会话列表（仅按 Project 分组展示会话）。若你更喜欢保留完整的独立历史会话列表入口，直接在 `Custom Flags` 中将其**拨为关闭**（`forced off`）即可永久生效。
@@ -101,10 +104,10 @@
 | **`enable-git-vcs-ui`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | `gitVcsUiStrategy` | **保持开启**：右侧栏 Git 工作区变更 Diff 与分支对比视图 |
 | **`enable-pdf-viewer`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | `pdfViewer` | **保持开启**：右侧栏原生 PDF 文档预览器 |
 | **`enable-notebook-rendering`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | `notebookRendering` | **保持开启**：右侧栏原生 Jupyter Notebook（`.ipynb`）渲染 |
-| `enable-enhanced-file-viewer` | 🆕 2.31 新增 | ⚪ 默认关闭 | `enhancedFileViewer`, `fileTokenization` | **按需尝鲜**：启用增强型文件查看器与语法分词渲染 |
+| `enable-enhanced-file-viewer` | 🆕 2.31 新增 | ⚪ 默认关闭 | `enhancedFileViewer`, `fileTokenization` | ⚠️ **`2.31` 外部包空壳**：`buildBindings.enhancedFileViewer` 为 `void 0`，开启不生效 |
 | `enable-file-viewer-keyboard-navigation` | ❌ 关闭 | ⚪ 默认关闭 | `fileViewerKeyboardNavigation` | **推荐按需开启**：原生文件查看器键盘快捷导航支持 |
 | `enable-catch-file-viewer` | ⚪ 未下发 | ⚪ 默认关闭 | `fileViewerComponent` | 保持默认关闭：替代版实验性文件查看器组件 |
-| `enable-code-search-palette` | ❌ 关闭 | ⚪ 默认关闭 | `codeSearchPalette` | **推荐按需开启**：工作区代码搜索命令面板 |
+| `enable-code-search-palette` | ❌ 关闭 | ⚪ 默认关闭 | `codeSearchPalette` | ⚠️ **`2.31` 外部包空壳**：依赖的 `buildBindings.codeSearch` 为 `void 0`，开启不生效 |
 | `enable-pane-selection-actions` | ❌ 关闭 | ⚪ 默认关闭 | `paneSelectionActions` | **按需尝鲜**：右侧栏选中文本后的快捷引用/操作浮条 |
 | `enable-jj-vcs-ui` | ❌ 关闭 | ⚪ 默认关闭 | `jjVcsUiStrategy` | 本地仓库使用 Jujutsu（`jj`）版本控制时可手动开启 |
 | `enable-permissioned-github` | ❌ 关闭 | ⚪ 默认关闭 | `githubSettings` | 需细粒度 GitHub 仓库授权管理页时可按需尝试 |
@@ -122,7 +125,7 @@
 | **`enable-conversation-selection-quoting`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | *(inline)* | **保持开启**：选中模型回复片段一键引用追问 |
 | **`enable-user-message-bubbles`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | *(inline)* | **保持开启**：用户消息气泡化展示（若偏好纯扁平文档流可手动关闭） |
 | `enable-context-menu-system` | ✅ **开启** | 🟢 **默认开启（原生基线）** | `contextMenuSystem` | **保持开启**：应用级统一深色自定义右键菜单 |
-| `enable-context-usage-indicator` | ❌ 关闭 | ⚪ 默认关闭 | `contextUsageIndicator` | **推荐手动开启尝鲜**：在对话界面显示原生上下文窗口用量指示器 |
+| `enable-context-usage-indicator` | ❌ 关闭 | ⚪ 默认关闭 | `contextUsageIndicator` | ⚠️ **`2.29` 可用 / `2.31` 已被上游剥离**：`2.31.0-1` 外部包将 `buildBindings.contextUsageIndicator` 置为 `void 0` 并拉入 `deniedSettings`，开启不生效（需该功能请用 `2.29` + `v2.29` 标签） |
 | `enable-conversation-groups` | ❌ 关闭 | ⚪ 默认关闭 | `conversationGroups` | **按需尝鲜**：左侧边栏会话自定义分组整理 |
 | `enable-conversation-forking` | ❌ 关闭 | ⚪ 默认关闭 | *(inline)* | **推荐按需开启**：允许将当前会话分支派生（Fork）为新会话 |
 | `enable-fork-at-historical-step` | ❌ 关闭 | ⚪ 默认关闭 | *(inline)* | **推荐按需开启**：支持从任意历史步骤节点处分叉新会话（配合上一项） |
