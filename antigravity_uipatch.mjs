@@ -13,7 +13,7 @@
  *
  * Verified mechanism (see docs/ for the full forensic chain)
  * ----------------------------------------------------------
- * 1. Antigravity Desktop gates ~95 frontend features (`Extensions` menu, built-in
+ * 1. Antigravity Desktop gates ~107 frontend features (`Extensions` menu, built-in
  *    `Terminal`, native `File Explorer` tab, `Settings -> Developer`, etc.) behind
  *    Mendel experiment flags fetched via `GetMendelFlags`.
  * 2. When running in Enterprise Gateway / custom model mode without a Google
@@ -33,26 +33,26 @@
  *    is set in the environment. Without that variable, behavior is 100% stock.
  *    Repacking uses an append-only strategy that preserves every untouched entry
  *    (including any prior third-party `app.asar` patches) byte-for-byte.
- * 2. Extracted Web UI (`~/.local/share/antigravity-uipatch/`) with 4 choke-point
- *    patches in `main.js`, validated by V8 (`vm.Script`) before commit:
- *    - `mendel-native-baseline`: pre-hydrates `jetski.developer.*` overrides from
- *      Electron's `window.nativeStorage` (`~/.config/Antigravity/app_storage.json`)
- *      into `localStorage` before resolving `fka()`; when `GetMendelFlags` returns
- *      `{}` (Gateway Mode), seeds `MendelExperimentProvider` with the empirically
- *      verified Google Native OAuth baseline (41 boolean `ON` flags + 7 string-payload
- *      flags) plus `enable-developer-mode`; when signed in with Google Native OAuth
- *      (`list.length > 0`), preserves the live server table intact and only ensures
- *      `enable-developer-mode` is ON.
- *    - `mendel-service-wrapper`: feeds the secondary `lB().getMendelFlags` wrapper
- *      (`FS` / `GS` hooks) through the same normalizer.
- *    - `mendel-local-overrides`: wires `jj`, `kj`, `FS`, and `flagOverrideSync` to
- *      honor bidirectional `localStorage["jetski.developer.customFlagOverrides"]`
- *      toggles live without mutating `baselineRuntimeEnvironment`, and hooks `mk()`
- *      to mirror `jetski.developer.*` writes to `window.nativeStorage` so overrides
- *      survive random loopback ports (`--https_server_port 0`) and package upgrades.
- *    - `flag-picker-scrollable`: replaces `mtb()`'s unscrollable, unthemed
- *      Chromium `<datalist>` popup with an upward-opening (`bottom-full mb-1`),
- *      scrollable (`max-h-64 overflow-y-auto`), keyboard-navigable dropdown.
+ * 2. Extracted Web UI (`~/.local/share/antigravity-uipatch/`) with 4 structural
+ *    choke-point patches in `main.js` (resolving Closure-minified identifiers by
+ *    unique AST/property signatures and validating output via V8 `vm.Script`):
+ *    - `mendel-native-baseline`: pre-hydrates `jetski.developer.customFlagOverrides`
+ *      from `window.nativeStorage` (`~/.config/Antigravity/app_storage.json`)
+ *      before resolving the primary Mendel fetcher (`Ola()`); when `GetMendelFlags`
+ *      returns `{}` (Gateway Mode), seeds `MendelExperimentProvider` with the
+ *      empirically verified Google Native OAuth baseline (41 boolean `ON` flags +
+ *      7 string-payload flags) plus `enable-developer-mode`; when signed in with
+ *      Google Native OAuth (`list.length > 0`), preserves the live server table
+ *      intact and only ensures `enable-developer-mode` is ON.
+ *    - `mendel-service-wrapper`: feeds the secondary `getMendelFlags` wrapper
+ *      (`IT` / `JT` hooks) through the same resolver + normalizer.
+ *    - `mendel-local-overrides`: binds `clientStorageFeature` (`hhd()`) and
+ *      `flagOverrideSync` (`Mla`) so direct Mendel boolean readers (`Hi`, `Ii`,
+ *      `IT`) honor bidirectional `customFlagOverrides` toggles immediately
+ *      without mutating `baselineRuntimeEnvironment`.
+ *    - `flag-picker-scrollable`: replaces the flag picker (`EGb()`) unscrollable,
+ *      unthemed Chromium `<datalist>` popup with an upward-opening (`bottom-full mb-1`),
+ *      scrollable (`max-h-64 overflow-y-auto`), keyboard-navigable ARIA combobox.
  * 3. Desktop launcher switch (`~/.local/share/applications/antigravity.desktop`):
  *    adds `AGY_UI_BUNDLE=<ui-dir>` and refreshes KDE `ksycoca6`.
  *
@@ -862,21 +862,53 @@ function countOccurrences(haystack, needle) {
   }
 }
 
+function countAnchorMatches(js, anchor) {
+  if (anchor instanceof RegExp) {
+    const flags = anchor.flags.includes('g') ? anchor.flags : `${anchor.flags}g`;
+    return [...js.matchAll(new RegExp(anchor.source, flags))].length;
+  }
+  return countOccurrences(js, anchor);
+}
+
+function matchUnique(js, regex, label) {
+  const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`;
+  const matches = [...js.matchAll(new RegExp(regex.source, flags))];
+  if (matches.length !== 1) {
+    throw new PatchError(
+      `${label} anchor mismatch: expected 1 occurrence, found ${matches.length}`,
+      3
+    );
+  }
+  return matches[0];
+}
+
+function resolveUniqueIdentifier(js, regex, label) {
+  const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`;
+  const matches = [...js.matchAll(new RegExp(regex.source, flags))];
+  const unique = Array.from(new Set(matches.map((m) => m[1])));
+  if (unique.length !== 1) {
+    throw new PatchError(
+      `${label} identifier mismatch: expected 1 distinct symbol, found ${unique.length}`,
+      3
+    );
+  }
+  return unique[0];
+}
+
 /**
- * Patch 1 (`fka()`): Hydrate `jetski.developer.*` overrides from Electron's
- * `window.nativeStorage` (`~/.config/Antigravity/app_storage.json`) into the
- * current random-port `localStorage` before resolving, then seed
- * `MendelExperimentProvider` with the empirically verified Google Native OAuth
- * baseline + `enable-developer-mode` whenever `GetMendelFlags` returns empty `{}`
- * (Enterprise Gateway mode). When signed in with a real Google OAuth account
- * (`list.length > 0`), preserves the live server table intact and only ensures
- * `enable-developer-mode` is enabled.
+ * Patch 1 (`Ola()` in 2.31): Pre-hydrate `jetski.developer.customFlagOverrides`
+ * from Electron's `window.nativeStorage` (`~/.config/Antigravity/app_storage.json`)
+ * before resolving `MendelExperimentProvider`'s primary fetch, and seed the
+ * empirically verified Google Native OAuth baseline + `enable-developer-mode`
+ * whenever `GetMendelFlags` returns empty `{}` (Enterprise Gateway mode). When
+ * signed in with Google Native OAuth (`list.length > 0`), preserves the live
+ * server table intact and only ensures `enable-developer-mode` is enabled.
  */
 export const PATCH_MENDEL_BASELINE = {
   id: 'mendel-native-baseline',
   occurrences: 1,
   anchor:
-    'async function fka(a){var b=e,c=e;try{try{let d=c(await b(a.getMendelFlags($b(sha,{})))).experimentConfig?.experiments??[];a={};for(let f of d)f.keyString&&(a[f.keyString]=f);return a}catch(d){c(),console.error("Failed to fetch Mendel flags",d)}}finally{b()}}',
+    /async function ([A-Za-z0-9_$]+)\(a\)\{var b=e,c=e;try\{try\{let d=c\(await b\(a\.getMendelFlags\(([A-Za-z0-9_$]+)\(([A-Za-z0-9_$]+),\{\}\)\)\)\)\.experimentConfig\?\.experiments\?\?\[\];a=\{\};for\(let f of d\)f\.keyString&&\(a\[f\.keyString\]=f\);return a\}catch\(d\)\{c\(\),console\.error\("Failed to fetch Mendel flags",d\)\}\}finally\{b\(\)\}\}/,
   apply(
     js,
     {
@@ -885,84 +917,78 @@ export const PATCH_MENDEL_BASELINE = {
       stringFlags = NATIVE_MENDEL_STRING_FLAGS,
     } = {}
   ) {
+    const m = matchUnique(js, this.anchor, 'PATCH_MENDEL_BASELINE');
+    const [fullMatch, fnName, pbCreate, reqSchema] = m;
+    const expNs = resolveUniqueIdentifier(
+      js,
+      /\b([A-Za-z0-9_$]+)\.ExperimentWithVariantSchema\b/g,
+      'PATCH_MENDEL_BASELINE:ExperimentWithVariantSchema'
+    );
     const allBools = Array.from(new Set([...boolFlags, ...flags]));
     const replacement =
       `var __AGY_UNLOCKED=${JSON.stringify(flags)},` +
       `__AGY_NATIVE_BOOLS=${JSON.stringify(allBools)},` +
       `__AGY_NATIVE_STRS=${JSON.stringify(stringFlags)},` +
+      `__AGY_OVR_KEY="jetski.developer.customFlagOverrides",` +
       `__AGY_KEYS=["jetski.developer.customFlagOverrides","jetski.developer.featureEnvironmentOverride"],` +
-      `__AGY_META_KEY="jetski.developer.__agyMeta",` +
-      `__AGY_HYDRATE_TIMEOUT=2000,__AGY_BRIDGE_GRACE=8000,__AGY_PERSIST_RETRIES=3,` +
-      `__agyNotifiers=[],__agyTomb={},__agyTombDirty=!1,__agyMetaReady=!1,` +
-      `__agyDirty={},__agyLastGood=null,` +
-      `__agyPending=null,__agyInflight=null,__agyPersistErr=null,__agyRetry=0,` +
-      `__agyHydrateState="idle",__agyHydrateP=null,__agyBridgeSeen=!1,__agyFirstMiss=0;` +
-      // --- write queue: serialise + coalesce nativeStorage.updateItems ---
-      `function __agyPersist(ch){if(!ch)return;if(!__agyPending)__agyPending={};for(var k in ch)__agyPending[k]=ch[k];__agyPump()}` +
-      `function __agyPump(){if(__agyInflight||!__agyPending)return;` +
-      `var b=__agyPending;__agyPending=null;__agyInflight=b;` +
-      `function settle(err){` +
-      `__agyInflight=null;` +
-      `if(!err){__agyRetry=0;if(!__agyPending)__agyPersistErr=null;__agyPump();return}` +
-      // Keep the unconfirmed batch: merge it back *under* any newer writes.
-      `var merged={},k;for(k in b)merged[k]=b[k];if(__agyPending)for(k in __agyPending)merged[k]=__agyPending[k];` +
-      `__agyPending=merged;__agyPersistErr=err;` +
-      `if(++__agyRetry>__AGY_PERSIST_RETRIES){__agyRetry=0;return}` +
-      `if(typeof setTimeout==="function")setTimeout(function(){__agyPump()},150*__agyRetry)}` +
-      `var pr;try{pr=window.nativeStorage.updateItems(b)}catch(e){settle(e);return}` +
-      `try{Promise.resolve(pr).then(function(){settle(null)},function(e){settle(e)})}catch(e){settle(e)}}` +
-      // --- change notification fan-out (registered by the provider patch) ---
+      `__AGY_HYDRATE_TIMEOUT=2000,__AGY_BRIDGE_GRACE=8000,` +
+      `__agyNotifiers=[],__agyOvrMap={},__agyOvrSig="[]",__agyOvrLoaded=!1,` +
+      `__agyStorageBound=!1,__agyLastGood=null,` +
+      `__agyHydrateState="idle",__agyHydrateP=null,__agyFirstMiss=0;` +
       `function __agyRegisterNotifier(f){if(typeof f!=="function")return function(){};__agyNotifiers.push(f);` +
       `return function(){var i=__agyNotifiers.indexOf(f);if(i>=0)__agyNotifiers.splice(i,1)}}` +
       `function __agyNotify(){for(var i=0;i<__agyNotifiers.length;i++){try{__agyNotifiers[i]()}catch{}}}` +
-      // --- local edits (called from the mk() patch); notifies BEFORE any RPC ---
-      `function __agyAfterLocalWrite(k,v){` +
-      `if(__agyHydrateState!=="done")__agyDirty[k]=1;` +
-      `var ch={};ch[k]=v;` +
-      `var tombChanged=!1;` +
-      `if(v===null||v===void 0){if(!__agyTomb[k]){__agyTomb[k]=1;tombChanged=!0}}` +
-      `else if(__agyTomb[k]){delete __agyTomb[k];tombChanged=!0}` +
-      `if(tombChanged){if(__agyMetaReady){try{ch[__AGY_META_KEY]=JSON.stringify({v:1,deleted:__agyTomb})}catch{}}else __agyTombDirty=!0}` +
-      `__agyPersist(ch);__agyNotify()}` +
-      // --- hydration: retryable, bounded, dirty/tombstone aware ---
+      `function __agyParseOvrJson(raw){var out={};if(typeof raw!=="string"||!raw)return out;` +
+      `try{var o=JSON.parse(raw);if(o&&typeof o==="object"&&!Array.isArray(o)){` +
+      `for(var k in o)if(Object.prototype.hasOwnProperty.call(o,k)&&typeof o[k]==="boolean")out[k]=o[k]}}catch{}return out}` +
+      `function __agySetOvrMap(obj){var next={},keys=[];` +
+      `if(obj&&typeof obj==="object"&&!Array.isArray(obj)){` +
+      `for(var k in obj)if(Object.prototype.hasOwnProperty.call(obj,k)&&typeof obj[k]==="boolean"){next[k]=obj[k];keys.push(k)}}` +
+      `keys.sort();var sig=JSON.stringify(keys.map(function(x){return[x,next[x]]}));` +
+      `var changed=!__agyOvrLoaded||sig!==__agyOvrSig;` +
+      `__agyOvrMap=next;__agyOvrSig=sig;__agyOvrLoaded=!0;if(changed)__agyNotify()}` +
+      `function __agySyncRawOvr(raw){__agySetOvrMap(__agyParseOvrJson(raw))}` +
+      // Bind Antigravity 2.31+'s `clientStorageFeature` (`storageService` backed
+      // by `window.nativeStorage` -> `~/.config/Antigravity/app_storage.json`).
+      `function __agyBindStorage(res){try{var s=res&&res.storageService;` +
+      `if(s&&typeof s.get==="function"){` +
+      `if(typeof window!=="undefined"&&window.localStorage&&typeof s.store==="function"){` +
+      `for(var i=0;i<__AGY_KEYS.length;i++){var k=__AGY_KEYS[i],cur=s.get(k);` +
+      `if(cur===void 0||cur===null){var loc=window.localStorage.getItem(k);` +
+      `if(typeof loc==="string")try{s.store(k,loc)}catch{}}}}` +
+      `__agyStorageBound=!0;__agyHydrateState="done";__agySyncRawOvr(s.get(__AGY_OVR_KEY));` +
+      `if(typeof s.onDidChange==="function"){s.onDidChange(function(ch){` +
+      `if(ch&&Object.prototype.hasOwnProperty.call(ch,__AGY_OVR_KEY))__agySyncRawOvr(ch[__AGY_OVR_KEY])})}` +
+      `}}catch{}return res}` +
+      // Retryable, bounded startup hydration in case `Ola()` resolves before `hhd()` binds `storageService`.
       `function __agyHydrateDevStorage(){` +
-      `if(__agyHydrateState==="done")return Promise.resolve(!0);` +
+      `if(__agyStorageBound||__agyHydrateState==="done")return Promise.resolve(!0);` +
       `if(__agyHydrateState==="pending"&&__agyHydrateP)return __agyHydrateP;` +
       `__agyHydrateState="pending";` +
       `__agyHydrateP=(async function(){var timer=null;try{` +
-      // A page with no bridge at all is different from a bridge that is not ready yet.
-      `if(typeof window==="undefined"||!window.nativeStorage||!window.nativeStorage.getItems){` +
       `if(typeof window==="undefined"){__agyHydrateState="done";return}` +
+      `if(!window.nativeStorage||!window.nativeStorage.getItems){` +
       `if(!__agyFirstMiss)__agyFirstMiss=Date.now();` +
       `if(typeof Date!=="undefined"&&(Date.now()-__agyFirstMiss)<__AGY_BRIDGE_GRACE){__agyHydrateState="idle";__agyHydrateP=null;return}` +
+      `try{if(!__agyStorageBound&&window.localStorage){var loc=window.localStorage.getItem(__AGY_OVR_KEY);` +
+      `if(typeof loc==="string")__agySyncRawOvr(loc)}}catch{}` +
       `__agyHydrateState="done";return}` +
-      `__agyBridgeSeen=!0;` +
       `var got=window.nativeStorage.getItems();` +
       `if(typeof setTimeout==="function"&&__AGY_HYDRATE_TIMEOUT>0){got=Promise.race([Promise.resolve(got),new Promise(function(_,rej){timer=setTimeout(function(){rej(new Error("nativeStorage.getItems timed out"))},__AGY_HYDRATE_TIMEOUT)})])}` +
       `var items=(await got)||{};` +
-      // Merge disk tombstones with any recorded before the metadata was ready.
-      `try{var rawMeta=items[__AGY_META_KEY];if(typeof rawMeta==="string"){var mm=JSON.parse(rawMeta);` +
-      `if(mm&&mm.deleted){for(var t1 in mm.deleted)if(!__agyTomb[t1])__agyTomb[t1]=mm.deleted[t1]}}}catch{}` +
-      `__agyMetaReady=!0;` +
-      `if(__agyTombDirty){var metaUp={};try{metaUp[__AGY_META_KEY]=JSON.stringify({v:1,deleted:__agyTomb})}catch{}` +
-      `if(metaUp[__AGY_META_KEY])__agyPersist(metaUp);__agyTombDirty=!1}` +
-      `var up={},changed=0;` +
-      `for(var i=0;i<__AGY_KEYS.length;i++){` +
-      `var k=__AGY_KEYS[i],disk=items[k],loc=window.localStorage.getItem(k);` +
-      `if(__agyDirty[k]){if(loc!==null)up[k]=loc;continue}` +
-      `if(typeof disk==="string"){` +
-      `if(loc!==disk){window.localStorage.setItem(k,disk);changed++;try{window.dispatchEvent(new StorageEvent("storage",{key:k,newValue:disk,oldValue:loc,storageArea:window.localStorage}))}catch{}}` +
-      `}else{` +
-      `if(__agyTomb[k]){if(loc!==null){window.localStorage.removeItem(k);changed++;try{window.dispatchEvent(new StorageEvent("storage",{key:k,newValue:null,oldValue:loc,storageArea:window.localStorage}))}catch{}}continue}` +
-      `if(loc!==null)up[k]=loc}` +
-      `}` +
-      `if(Object.keys(up).length>0)__agyPersist(up);` +
-      `__agyHydrateState="done";if(changed>0)__agyNotify()` +
+      `if(!__agyStorageBound){var disk=items[__AGY_OVR_KEY];` +
+      `if(typeof disk==="string")__agySyncRawOvr(disk);` +
+      `else{var locFb=window.localStorage?window.localStorage.getItem(__AGY_OVR_KEY):null;` +
+      `if(typeof locFb==="string")__agySyncRawOvr(locFb);else __agySetOvrMap({})}}` +
+      `__agyHydrateState="done"` +
       `}catch(exc){__agyHydrateState="idle";__agyHydrateP=null}finally{if(timer)clearTimeout(timer)}})();` +
       `return __agyHydrateP}` +
       `__agyHydrateDevStorage();` +
-      `function __agyOvr(k,v){try{var s=typeof window!=="undefined"?window.localStorage.getItem("jetski.developer.customFlagOverrides"):null;if(s){var o=JSON.parse(s);if(o&&typeof o[k]==="boolean")return o[k]}}catch{}return v}` +
-      `function __agyMkExp(k,s){return $b(D.ExperimentWithVariantSchema,s!==void 0?{keyString:k,disabled:!1,payload:{case:"string",value:s}}:{keyString:k,disabled:!1})}` +
+      `function __agyOvr(k,v){try{if(__agyOvrLoaded){` +
+      `return Object.prototype.hasOwnProperty.call(__agyOvrMap,k)&&typeof __agyOvrMap[k]==="boolean"?__agyOvrMap[k]:v}` +
+      `var s=typeof window!=="undefined"&&window.localStorage?window.localStorage.getItem(__AGY_OVR_KEY):null;` +
+      `if(s){var o=JSON.parse(s);if(o&&typeof o[k]==="boolean")return o[k]}}catch{}return v}` +
+      `function __agyMkExp(k,s){return ${pbCreate}(${expNs}.ExperimentWithVariantSchema,s!==void 0?{keyString:k,disabled:!1,payload:{case:"string",value:s}}:{keyString:k,disabled:!1})}` +
       // Shared success/failure policy: success-empty CLEARS the cache; only a
       // failed request (raw === undefined) falls back to last-known-good.
       `function __agyResolveExperiments(raw){` +
@@ -982,82 +1008,113 @@ export const PATCH_MENDEL_BASELINE = {
       `for(var m of Object.entries(__AGY_NATIVE_STRS))base.push(__agyMkExp(m[0],m[1]));` +
       `return base;` +
       `}` +
-      `async function fka(a){var b=e,c=e;try{await __agyHydrateDevStorage();` +
+      `async function ${fnName}(a){var b=e,c=e;try{await __agyHydrateDevStorage();` +
       `var raw,ok=!1;` +
-      `try{raw=c(await b(a.getMendelFlags($b(sha,{})))).experimentConfig?.experiments;ok=!0}catch(d){c(),console.error("Failed to fetch Mendel flags",d)}` +
+      `try{raw=c(await b(a.getMendelFlags(${pbCreate}(${reqSchema},{})))).experimentConfig?.experiments;ok=!0}catch(d){c(),console.error("Failed to fetch Mendel flags",d)}` +
       `var list=__agyNormalizeMendel(__agyResolveExperiments(ok?raw:void 0)),out={};` +
       `for(let f of list)f.keyString&&(out[f.keyString]=f);return out}finally{b()}}`;
-    return js.replace(this.anchor, replacement);
+    return js.replace(fullMatch, () => replacement);
   },
 };
 
 /**
- * Patch 2 (`lB().getMendelFlags`): Pass the secondary Mendel client wrapper
- * (used by `FS()` / `GS()` hooks) through `__agyNormalizeMendel` as well.
+ * Patch 2 (`Qt().getMendelFlags` in 2.31): Pass the secondary Mendel client
+ * wrapper (used by `IT()` / `JT()` hooks) through `__agyResolveExperiments` and
+ * `__agyNormalizeMendel` with error catching unified with Patch 1.
  */
 export const PATCH_MENDEL_SERVICE = {
   id: 'mendel-service-wrapper',
   occurrences: 1,
   anchor:
-    'getMendelFlags:async()=>\nf(async t=>{var v=e,w=e;try{let x=w(await v(t.getMendelFlags($b(sha,{}))));return{experimentConfig:x.experimentConfig?{experiments:x.experimentConfig.experiments}:void 0}}finally{v()}})',
+    /getMendelFlags:async\(\)=>\s*([A-Za-z0-9_$]+)\(async ([A-Za-z0-9_$]+)=>\{var ([A-Za-z0-9_$]+)=e,([A-Za-z0-9_$]+)=e;try\{let ([A-Za-z0-9_$]+)=\4\(await \3\(\2\.getMendelFlags\(([A-Za-z0-9_$]+)\(([A-Za-z0-9_$]+),\{\}\)\)\)\);return\{experimentConfig:\5\.experimentConfig\?\{experiments:\5\.experimentConfig\.experiments\}:void 0\}\}finally\{\3\(\)\}\}\)/,
   apply(js) {
-    return js.replace(
-      this.anchor,
-      'getMendelFlags:async()=>\nf(async t=>{var v=e,w=e;let x,ok=!1;try{try{x=w(await v(t.getMendelFlags($b(sha,{})))).experimentConfig?.experiments;ok=!0}catch(err){console.error("Failed to fetch Mendel flags (secondary)",err)}}finally{v()}return{experimentConfig:{experiments:__agyNormalizeMendel(__agyResolveExperiments(ok?x:void 0))}}})'
-    );
+    const m = matchUnique(js, this.anchor, 'PATCH_MENDEL_SERVICE');
+    const [fullMatch, wrapFn, clientParam, vVar, wVar, , pbCreate, reqSchema] = m;
+    const replacement =
+      `getMendelFlags:async()=>${wrapFn}(async ${clientParam}=>{var ${vVar}=e,${wVar}=e;let x,ok=!1;` +
+      `try{try{x=${wVar}(await ${vVar}(${clientParam}.getMendelFlags(${pbCreate}(${reqSchema},{})))).experimentConfig?.experiments;ok=!0}` +
+      `catch(err){console.error("Failed to fetch Mendel flags (secondary)",err)}}finally{${vVar}()}` +
+      `return{experimentConfig:{experiments:__agyNormalizeMendel(__agyResolveExperiments(ok?x:void 0))}}})`;
+    return js.replace(fullMatch, () => replacement);
   },
 };
 
 /**
- * Patch 3 (`jj` / `kj` / `FS` / `flagOverrideSync` / `mk()`): Make direct Mendel
- * boolean readers honor `localStorage["jetski.developer.customFlagOverrides"]`,
- * notify reactive listeners immediately without mutating the baseline state, and
- * mirror `jetski.developer.*` writes to `window.nativeStorage` (`app_storage.json`)
- * so overrides survive random loopback ports and package reinstalls.
+ * Patch 3 (`Hi` / `Ii` / `IT` / `flagOverrideSync` / `hhd()` in 2.31): Make
+ * direct Mendel boolean readers honor `jetski.developer.customFlagOverrides`,
+ * bind `clientStorageFeature`'s `storageService` (`app_storage.json`), and
+ * notify reactive listeners immediately without waiting on the backend RPC queue.
  */
 export const PATCH_MENDEL_OVERRIDES = {
   id: 'mendel-local-overrides',
   occurrences: 1,
-  anchor: 'function jj(a,b){return(a=a.experiments[b])?!a.disabled:!1}',
+  anchor: /function ([A-Za-z0-9_$]+)\(a,b\)\{return\(a=a\.experiments\[b\]\)\?!a\.disabled:!1\}/,
   apply(js) {
-    const kjAnchor =
-      'c||(c=Oi(a.stateProvider,d=>(d=d[b])?!d.disabled:!1),a.experimentEnabledProviders.set(b,c));';
-    const syncAnchor =
-      'this.flagOverrideSync=new dka(async b=>{var c=e,d=e;try{d(await c(this.lsClient.setMendelFlagOverrides($b(Yga,{overrides:b}))))}finally{c()}});';
-    const fsAnchor = 'var FS=a=>(a=ayb(a))?!a.disabled:!1,';
-    const mkAnchor = 't===null?window.localStorage.removeItem(a):window.localStorage.setItem(a,t);';
-
-    for (const [label, anc] of [
-      ['kj', kjAnchor],
-      ['flagOverrideSync', syncAnchor],
-      ['FS', fsAnchor],
-      ['mkStorageWrite', mkAnchor],
-    ]) {
-      if (countOccurrences(js, anc) !== 1) {
-        throw new PatchError(`PATCH_MENDEL_OVERRIDES: sub-anchor "${label}" mismatch`, 3);
-      }
-    }
+    const [syncFull, syncFn] = matchUnique(js, this.anchor, 'PATCH_MENDEL_OVERRIDES:syncBool');
+    const [reactiveFull, mapFn] = matchUnique(
+      js,
+      /c\|\|\(c=([A-Za-z0-9_$]+)\(a\.stateProvider,d=>\(d=d\[b\]\)\?!d\.disabled:!1\),a\.experimentEnabledProviders\.set\(b,c\)\);/,
+      'PATCH_MENDEL_OVERRIDES:reactiveBool'
+    );
+    const [syncPropFull, syncClass, pbCreate, ovrSchema] = matchUnique(
+      js,
+      /this\.flagOverrideSync=new ([A-Za-z0-9_$]+)\(async b=>\{var c=e,d=e;try\{d\(await c\(this\.lsClient\.setMendelFlagOverrides\(([A-Za-z0-9_$]+)\(([A-Za-z0-9_$]+),\{overrides:b\}\)\)\)\)\}finally\{c\(\)\}\}\);/,
+      'PATCH_MENDEL_OVERRIDES:flagOverrideSync'
+    );
+    const [disposeFull, stopPollFn] = matchUnique(
+      js,
+      /dispose\(\)\{([A-Za-z0-9_$]+)\(this\);this\.stateProvider\.dispose\(\);/,
+      'PATCH_MENDEL_OVERRIDES:providerDispose'
+    );
+    const [secFull, secFn, secHook] = matchUnique(
+      js,
+      /var ([A-Za-z0-9_$]+)=a=>\(a=([A-Za-z0-9_$]+)\(a\)\)\?!a\.disabled:!1,(?=[A-Za-z0-9_$]+=\(a,b\)=>\{var c=\2\(a\))/,
+      'PATCH_MENDEL_OVERRIDES:secondaryBool'
+    );
+    const [storageFull, storageInitFn] = matchUnique(
+      js,
+      /async function ([A-Za-z0-9_$]+)\(a\)\{(?=var b=e,c=e;try\{if\(typeof window!=="undefined"&&window\.nativeStorage\)try\{let f=new [A-Za-z0-9_$]+\(window\.nativeStorage\);)/,
+      'PATCH_MENDEL_OVERRIDES:storageInit'
+    );
 
     let out = js.replace(
-      this.anchor,
-      'function jj(a,b){return __agyOvr(b,(a=a.experiments[b])?!a.disabled:!1)}'
+      syncFull,
+      () => `function ${syncFn}(a,b){return __agyOvr(b,(a=a.experiments[b])?!a.disabled:!1)}`
     );
     out = out.replace(
-      kjAnchor,
-      'c||(c=Oi(a.stateProvider,d=>__agyOvr(b,(d=d[b])?!d.disabled:!1)),a.experimentEnabledProviders.set(b,c));'
+      reactiveFull,
+      () =>
+        `c||(c=${mapFn}(a.stateProvider,d=>__agyOvr(b,(d=d[b])?!d.disabled:!1)),a.experimentEnabledProviders.set(b,c));`
     );
     out = out.replace(
-      syncAnchor,
-      // Notify local consumers *before* the backend round-trip so the UI never
-      // lags behind the local store; the RPC is best-effort and still refreshes
-      // state once it settles (success or permission_denied).
-      'this.flagOverrideSync=new dka(async b=>{var c=e,d=e;this.stateProvider.setState(this.stateProvider.getState());try{try{d(await c(this.lsClient.setMendelFlagOverrides($b(Yga,{overrides:b}))))}catch{d()}}finally{c();this.stateProvider.setState(this.stateProvider.getState())}});try{var __agySelf=this;this.__agyDisposeNotifier=__agyRegisterNotifier(function(){__agySelf.stateProvider.setState(__agySelf.stateProvider.getState())})}catch{}'
+      syncPropFull,
+      () =>
+        `this.flagOverrideSync=new ${syncClass}(async b=>{var c=e,d=e;` +
+        `this.stateProvider.setState(this.stateProvider.getState());` +
+        `try{try{d(await c(this.lsClient.setMendelFlagOverrides(${pbCreate}(${ovrSchema},{overrides:b}))))}catch{d()}}` +
+        `finally{c();this.stateProvider.setState(this.stateProvider.getState())}});` +
+        `try{var __agySelf=this;` +
+        `this.__agyDisposeNotifier=__agyRegisterNotifier(function(){__agySelf.stateProvider.setState(__agySelf.stateProvider.getState())});` +
+        `if(this.flagOverrideSync&&typeof this.flagOverrideSync.set==="function"){` +
+        `var __agyOrigSet=this.flagOverrideSync.set.bind(this.flagOverrideSync);` +
+        `this.flagOverrideSync.set=function(m){__agySetOvrMap(m);return __agyOrigSet(m)}}` +
+        `}catch{}`
     );
-    out = out.replace(fsAnchor, 'var FS=a=>__agyOvr(a,(a=ayb(a))?!a.disabled:!1),');
     out = out.replace(
-      mkAnchor,
-      mkAnchor +
-        'try{if(typeof a==="string"&&a.indexOf("jetski.developer.")===0)__agyAfterLocalWrite(a,t)}catch{}'
+      disposeFull,
+      () =>
+        `dispose(){try{this.__agyDisposeNotifier&&this.__agyDisposeNotifier();this.__agyDisposeNotifier=null}catch{}` +
+        `${stopPollFn}(this);this.stateProvider.dispose();`
+    );
+    out = out.replace(
+      secFull,
+      () => `var ${secFn}=a=>__agyOvr(a,(a=${secHook}(a))?!a.disabled:!1),`
+    );
+    out = out.replace(
+      storageFull,
+      () =>
+        `async function ${storageInitFn}(a){return __agyBindStorage(await __agyRawStorageInit(a))}` +
+        `async function __agyRawStorageInit(a){`
     );
     return out;
   },
@@ -1145,7 +1202,7 @@ function assertSupportedConstruct(js, i) {
   const next = js[i + 1];
   if (next === '/' || next === '*') {
     throw new PatchError(
-      'PATCH_FLAG_PICKER: comment inside mtb() is unsupported; refusing to guess',
+      'PATCH_FLAG_PICKER: comment inside flag picker is unsupported; refusing to guess',
       3
     );
   }
@@ -1156,24 +1213,25 @@ function assertSupportedConstruct(js, i) {
   const divisionSafe = /[A-Za-z0-9_$)\]}]/.test(prev);
   if (!divisionSafe) {
     throw new PatchError(
-      'PATCH_FLAG_PICKER: regex literal inside mtb() is unsupported; refusing to guess',
+      'PATCH_FLAG_PICKER: regex literal inside flag picker is unsupported; refusing to guess',
       3
     );
   }
 }
 
-function buildFlagPickerSource() {
-  return `function mtb({suggestedFlags:a,onAdd:b}){
-  var [c,d]=A.useState(""),
-      [open,setOpen]=A.useState(!1),
-      [active,setActive]=A.useState(0),
-      box=A.useRef(null),
-      listRef=A.useRef(null);
+function buildFlagPickerSource({ fnName, reactIdent, buttonIdent }) {
+  const R = reactIdent;
+  return `function ${fnName}({suggestedFlags:a,onAdd:b}){
+  var [c,d]=${R}.useState(""),
+      [open,setOpen]=${R}.useState(!1),
+      [active,setActive]=${R}.useState(0),
+      box=${R}.useRef(null),
+      listRef=${R}.useRef(null);
   var q=c.trim().toLowerCase(),
       matches=q?a.filter(function(x){return x.toLowerCase().indexOf(q)!==-1}):a,
       listId="agy-flag-picker-listbox",
       optionId=function(i){return "agy-flag-picker-option-"+i};
-  A.useEffect(function(){
+  ${R}.useEffect(function(){
     if(!open)return;
     function onDown(e){
       if(box.current&&!box.current.contains(e.target))setOpen(!1);
@@ -1181,12 +1239,12 @@ function buildFlagPickerSource() {
     document.addEventListener("mousedown",onDown);
     return function(){document.removeEventListener("mousedown",onDown)};
   },[open]);
-  A.useEffect(function(){
+  ${R}.useEffect(function(){
     if(!open||!listRef.current)return;
     var el=listRef.current.querySelector('[data-active="1"]');
     if(el&&typeof el.scrollIntoView==="function")el.scrollIntoView({block:"nearest"});
   },[active,open]);
-  A.useEffect(function(){setActive(0)},[q,open]);
+  ${R}.useEffect(function(){setActive(0)},[q,open]);
   function commit(x){
     var v=(typeof x==="string"?x:c).trim();
     if(!v)return;
@@ -1200,19 +1258,19 @@ function buildFlagPickerSource() {
     else if(e.key==="Tab"){setOpen(!1)}
   }
   var activeOpt=open&&matches.length>0?matches[active]:void 0;
-  return A.createElement("div",{ref:box,className:"relative",onBlur:function(e){
+  return ${R}.createElement("div",{ref:box,className:"relative",onBlur:function(e){
       if(box.current&&!box.current.contains(e.relatedTarget))setOpen(!1);
     }},
-    A.createElement("div",{className:"flex items-center gap-2"},
-      A.createElement("input",{type:"text",value:c,placeholder:"Turn on a flag you don't have","aria-label":"Custom flag to turn on","aria-expanded":open,"aria-controls":open?listId:void 0,"aria-activedescendant":typeof activeOpt==="string"?optionId(active):void 0,"aria-autocomplete":"list",role:"combobox",
+    ${R}.createElement("div",{className:"flex items-center gap-2"},
+      ${R}.createElement("input",{type:"text",value:c,placeholder:"Turn on a flag you don't have","aria-label":"Custom flag to turn on","aria-expanded":open,"aria-controls":open?listId:void 0,"aria-activedescendant":typeof activeOpt==="string"?optionId(active):void 0,"aria-autocomplete":"list",role:"combobox",
         onChange:function(e){d(e.target.value);setOpen(!0)},
         onFocus:function(){setOpen(!0)},
         onKeyDown:onKey,
         className:"flex-1 h-7 px-2 text-sm bg-secondary text-foreground rounded-md border border-border outline-none placeholder:text-muted-foreground"}),
-      A.createElement(aB,{variant:"outline",size:"sm",disabled:!c.trim(),onClick:function(){commit()}},"Add")),
-    open&&matches.length>0&&A.createElement("div",{id:listId,role:"listbox",ref:listRef,className:"absolute left-0 right-0 bottom-full mb-1 z-50 max-h-64 overflow-y-auto bg-card border border-border rounded-md shadow-lg py-1"},
+      ${R}.createElement(${buttonIdent},{variant:"outline",size:"sm",disabled:!c.trim(),onClick:function(){commit()}},"Add")),
+    open&&matches.length>0&&${R}.createElement("div",{id:listId,role:"listbox",ref:listRef,className:"absolute left-0 right-0 bottom-full mb-1 z-50 max-h-64 overflow-y-auto bg-card border border-border rounded-md shadow-lg py-1"},
       matches.map(function(x,i){
-        return A.createElement("div",{key:x,id:optionId(i),role:"option","aria-selected":i===active,"data-active":i===active?"1":"0",
+        return ${R}.createElement("div",{key:x,id:optionId(i),role:"option","aria-selected":i===active,"data-active":i===active?"1":"0",
           onMouseDown:function(e){e.preventDefault();commit(x)},
           onMouseEnter:function(){setActive(i)},
           className:"px-2 py-1 text-xs font-mono cursor-pointer truncate "+(i===active?"bg-secondary text-foreground":"text-muted-foreground")},
@@ -1222,27 +1280,24 @@ function buildFlagPickerSource() {
 }
 
 /**
- * Patch 4 (`mtb()`): Replaces Chromium's unscrollable, unthemed `<datalist>`
- * popup in Settings -> Developer with a themed, upward-opening scrollable combobox.
+ * Patch 4 (`EGb()` in 2.31): Replaces Chromium's unscrollable, unthemed
+ * `<datalist>` popup in Settings -> Developer with a themed, upward-opening
+ * scrollable combobox, resolving the minified component, React, and Button
+ * identifiers structurally.
  */
 export const PATCH_FLAG_PICKER = {
   id: 'flag-picker-scrollable',
   occurrences: 1,
-  anchor: 'function mtb({suggestedFlags:a,onAdd:b}){',
+  anchor: /function ([A-Za-z0-9_$]+)\(\{suggestedFlags:a,onAdd:b\}\)\{/,
   apply(js) {
-    const start = js.indexOf('function mtb({suggestedFlags:a,onAdd:b}){');
-    if (start === -1) throw new PatchError('PATCH_FLAG_PICKER: mtb() disappeared', 3);
+    const m = matchUnique(js, this.anchor, 'PATCH_FLAG_PICKER');
+    const fnName = m[1];
+    const start = m.index;
 
-    // A real tokenizer is out of scope for a zero-dependency tool, so this uses
-    // a *strict* structural scan instead of guessing: whenever the body contains
-    // a construct whose extent cannot be determined without a lexer (comments,
-    // regex literals), the patch refuses rather than risk swallowing the next
-    // function. Regex detection is conservative: any `/` that is not clearly
-    // division fails the scan.
     const bodyOpen = findFunctionBodyOpen(js, start);
     const bodyClose = findMatchingBrace(js, bodyOpen);
     if (bodyClose === -1) {
-      throw new PatchError('PATCH_FLAG_PICKER: unbalanced braces in mtb()', 3);
+      throw new PatchError(`PATCH_FLAG_PICKER: unbalanced braces in ${fnName}()`, 3);
     }
 
     // Safety net: the replaced region must not span a second top-level function
@@ -1250,12 +1305,27 @@ export const PATCH_FLAG_PICKER = {
     const replacedRegion = js.slice(start, bodyClose + 1);
     if (/function\s+[A-Za-z0-9_$]+\s*\(/.test(replacedRegion.slice(1))) {
       throw new PatchError(
-        'PATCH_FLAG_PICKER: detected a nested function declaration inside mtb(); refusing to guess the boundary',
+        `PATCH_FLAG_PICKER: detected a nested function declaration inside ${fnName}(); refusing to guess the boundary`,
         3
       );
     }
 
-    return js.slice(0, start) + buildFlagPickerSource() + js.slice(bodyClose + 1);
+    const reactIdent = resolveUniqueIdentifier(
+      replacedRegion,
+      /\b([A-Za-z0-9_$]+)\.createElement\(/g,
+      'PATCH_FLAG_PICKER:React'
+    );
+    const [, buttonIdent] = matchUnique(
+      replacedRegion,
+      /\.createElement\(([A-Za-z0-9_$]+),\{variant:"outline",size:"sm"/,
+      'PATCH_FLAG_PICKER:Button'
+    );
+
+    return (
+      js.slice(0, start) +
+      buildFlagPickerSource({ fnName, reactIdent, buttonIdent }) +
+      js.slice(bodyClose + 1)
+    );
   },
 };
 
@@ -1274,12 +1344,12 @@ export function applyPatches(
   let out = js;
 
   for (const patch of patches) {
-    const seen = countOccurrences(js, patch.anchor);
+    const seen = countAnchorMatches(js, patch.anchor);
     const expected = patch.occurrences ?? 1;
     if (seen !== expected) {
       throw new PatchError(
         `patch "${patch.id}" anchor mismatch: expected ${expected} occurrence(s), found ${seen}.\n` +
-          `Antigravity likely updated its frontend code. Anchor:\n  ${patch.anchor}`,
+          `Antigravity likely updated its frontend code. Anchor:\n  ${String(patch.anchor)}`,
         3
       );
     }
@@ -1288,7 +1358,7 @@ export function applyPatches(
       throw new PatchError(`patch "${patch.id}" produced no change`, 3);
     }
     out = next;
-    results.push({ id: patch.id, anchor: patch.anchor, occurrences: seen });
+    results.push({ id: patch.id, anchor: String(patch.anchor), occurrences: seen });
   }
 
   if (out === js) throw new PatchError('no patches applied', 3);

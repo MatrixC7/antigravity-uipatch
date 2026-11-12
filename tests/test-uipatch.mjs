@@ -150,14 +150,20 @@ function makeSyntheticZip(entries) {
   return Buffer.concat([...localParts, cdBuf, eocd]);
 }
 
+const SYNTH_BASELINE_SNIPPET =
+  'var _expRef=E.ExperimentWithVariantSchema;' +
+  'async function Ola(a){var b=e,c=e;try{try{let d=c(await b(a.getMendelFlags(Wb(Uia,{})))).experimentConfig?.experiments??[];a={};for(let f of d)f.keyString&&(a[f.keyString]=f);return a}catch(d){c(),console.error("Failed to fetch Mendel flags",d)}}finally{b()}}';
+
 const SYNTH_BUNDLE = [
-  PATCH_MENDEL_BASELINE.anchor,
-  PATCH_MENDEL_OVERRIDES.anchor,
-  'function kj(a,b){var c;c||(c=Oi(a.stateProvider,d=>(d=d[b])?!d.disabled:!1),a.experimentEnabledProviders.set(b,c));return c}',
-  'var jka=class{constructor(a){this.lsClient=a;this.stateProvider={getState:()=>({}),setState:()=>{}};this.flagOverrideSync=new dka(async b=>{var c=e,d=e;try{d(await c(this.lsClient.setMendelFlagOverrides($b(Yga,{overrides:b}))))}finally{c()}});}}',  'const svc={' + PATCH_MENDEL_SERVICE.anchor + '};',
-  'var FS=a=>(a=ayb(a))?!a.disabled:!1,GS=1;',
-  'function mkWrite(a,t){t===null?window.localStorage.removeItem(a):window.localStorage.setItem(a,t);}',
-  'function mtb({suggestedFlags:a,onAdd:b}){var [c,d]=A.useState("");var r=A.createElement("datalist",{id:"custom-flag-suggestions"},a.map(function(g){return A.createElement("option",{key:g,value:g})}));return A.createElement("div",null,r)}',
+  SYNTH_BASELINE_SNIPPET,
+  'function Hi(a,b){return(a=a.experiments[b])?!a.disabled:!1}',
+  'function Ii(a,b){var c;c||(c=jh(a.stateProvider,d=>(d=d[b])?!d.disabled:!1),a.experimentEnabledProviders.set(b,c));return c}',
+  'var Tla=class{constructor(a){this.lsClient=a;this.stateProvider={getState:()=>({}),setState:()=>{},dispose:()=>{}};this.flagOverrideSync=new Mla(async b=>{var c=e,d=e;try{d(await c(this.lsClient.setMendelFlagOverrides(Wb(yia,{overrides:b}))))}finally{c()}});}dispose(){Rla(this);this.stateProvider.dispose();}}',
+  'const svc={getMendelFlags:async()=>f(async u=>{var v=e,w=e;try{let x=w(await v(u.getMendelFlags(Wb(Uia,{}))));return{experimentConfig:x.experimentConfig?{experiments:x.experimentConfig.experiments}:void 0}}finally{v()}})};',
+  'var IT=a=>(a=NMb(a))?!a.disabled:!1,JT=(a,b)=>{var c=NMb(a);return b};',
+  'var fgd=class{constructor(a=window.nativeStorage){this.bridge=a;this.cache=new Map;this.listeners=new Set}async init(){let c=(await this.bridge.getItems())||{};for(let [d,f]of Object.entries(c))this.cache.set(d,f)}notify(a){for(let b of this.listeners)b(a)}get(a,b){return this.cache.get(a)??b}store(a,b){this.cache.set(a,b);this.notify({[a]:b});return this.bridge.updateItems({[a]:b})}remove(a){this.cache.delete(a);this.notify({[a]:null});return this.bridge.updateItems({[a]:null})}onDidChange(a){this.listeners.add(a);return()=>{this.listeners.delete(a)}}};',
+  'async function hhd(a){var b=e,c=e;try{if(typeof window!=="undefined"&&window.nativeStorage)try{let f=new fgd(window.nativeStorage);c(await b(f.init()));return{backend:"native-bridge",storageService:f}}catch(f){}return{backend:"web",storageService:null}}finally{b()}}',
+  'function EGb({suggestedFlags:a,onAdd:b}){var [c,d]=B.useState("");var r=B.createElement("datalist",{id:"custom-flag-suggestions"},a.map(function(g){return B.createElement("option",{key:g,value:g})}));return B.createElement("div",null,r,B.createElement(Uy,{variant:"outline",size:"sm",disabled:!c.trim(),onClick:function(){}},"Add"))}',
 ].join(';\n');
 
 // ---------------------------------------------------------------------------
@@ -290,16 +296,16 @@ test('applyPatches transforms all 4 sites cleanly and passes V8 syntax check', (
 });
 
 test('injected __agyNormalizeMendel seeds Google Native baseline on empty list and preserves live OAuth list', () => {
-  const { output } = applyPatches(PATCH_MENDEL_BASELINE.anchor, {
+  const { output } = applyPatches(SYNTH_BASELINE_SNIPPET, {
     flags: ['enable-developer-mode'],
     patches: [PATCH_MENDEL_BASELINE],
   });
 
   let store = null;
   const ctx = vm.createContext({
-    D: { ExperimentWithVariantSchema: 'SchemaStub' },
-    $b: (_schema, init) => ({ ...init }),
-    sha: 'ReqSchema',
+    E: { ExperimentWithVariantSchema: 'SchemaStub' },
+    Wb: (_schema, init) => ({ ...init }),
+    Uia: 'ReqSchema',
     e: (x) => x,
     console,
     window: {
@@ -335,7 +341,7 @@ test('injected __agyNormalizeMendel seeds Google Native baseline on empty list a
   assert.equal(liveMap.get('server-future-flag')?.disabled, false);
   assert.equal(liveMap.get('server-disabled-flag')?.disabled, true);
 
-  // 3. __agyOvr honors localStorage boolean overrides in both directions
+  // 3. __agyOvr honors pre-hydration localStorage fallback and bound override map in both directions
   assert.equal(ctx.__agyOvr('enable-ui-sidecars', true), true);
   store = JSON.stringify({ 'enable-ui-sidecars': false, 'enable-file-explorer-tab': true });
   assert.equal(ctx.__agyOvr('enable-ui-sidecars', true), false);
@@ -343,7 +349,7 @@ test('injected __agyNormalizeMendel seeds Google Native baseline on empty list a
   assert.equal(ctx.__agyOvr('untouched-flag', true), true);
 });
 
-test('nativeStorage bridge persists overrides across random-port restarts and reinstalls', async () => {
+test('clientStorageFeature + nativeStorage bridge persists overrides across random-port restarts', async () => {
   const { output } = applyPatches(SYNTH_BUNDLE, { flags: ['enable-developer-mode'] });
   const diskStore = {};
 
@@ -370,48 +376,47 @@ test('nativeStorage bridge persists overrides across random-port restarts and re
 
   const makeCtx = (win) =>
     vm.createContext({
-      D: { ExperimentWithVariantSchema: 'SchemaStub' },
-      $b: (_s, init) => ({ ...init }),
-      Yga: 'OverrideSchema',
-      sha: 'ReqSchema',
-      A: {},
-      Oi: () => ({}),
-      ayb: () => null,
-      dka: class {},
+      E: { ExperimentWithVariantSchema: 'SchemaStub' },
+      Wb: (_s, init) => ({ ...init }),
+      yia: 'OverrideSchema',
+      Uia: 'ReqSchema',
+      B: {},
+      Uy: 'ButtonStub',
+      Rla: () => {},
+      f: (fn) => fn,
+      jh: () => ({}),
+      NMb: () => null,
+      Mla: class {},
       e: (x) => x,
       console,
-      StorageEvent: class {},
       setTimeout,
       clearTimeout,
       Promise,
       window: win,
     });
 
-  // Launch 1 (port A): user toggles a flag -> queued write lands in diskStore
+  // Launch 1 (port A): bind clientStorageFeature (`hhd`) and write overrides -> lands in diskStore & __agyOvr
   const win1 = makePortWindow();
   const ctx1 = makeCtx(win1);
   vm.runInContext(output, ctx1);
-  await ctx1.__agyHydrateDevStorage();
-  ctx1.mkWrite(
+  const { storageService: s1 } = await ctx1.hhd({});
+  await s1.store(
     'jetski.developer.customFlagOverrides',
     '{"remove-conversation-history":false,"enable-file-explorer-tab":true}'
   );
-  await new Promise((r) => setTimeout(r, 0));
   assert.equal(
     diskStore['jetski.developer.customFlagOverrides'],
     '{"remove-conversation-history":false,"enable-file-explorer-tab":true}'
   );
+  assert.equal(ctx1.__agyOvr('remove-conversation-history', true), false);
+  assert.equal(ctx1.__agyOvr('enable-file-explorer-tab', false), true);
 
-  // Launch 2 (new random port B -> empty localStorage): hydrated from diskStore before fka resolves
+  // Launch 2 (new random port B -> empty localStorage): early hydration reads diskStore before Ola resolves
   const win2 = makePortWindow();
   assert.equal(win2.localStorage.getItem('jetski.developer.customFlagOverrides'), null);
   const ctx2 = makeCtx(win2);
   vm.runInContext(output, ctx2);
   await ctx2.__agyHydrateDevStorage();
-  assert.equal(
-    win2.localStorage.getItem('jetski.developer.customFlagOverrides'),
-    '{"remove-conversation-history":false,"enable-file-explorer-tab":true}'
-  );
   assert.equal(ctx2.__agyOvr('remove-conversation-history', true), false);
   assert.equal(ctx2.__agyOvr('enable-file-explorer-tab', false), true);
 });
@@ -419,30 +424,26 @@ test('nativeStorage bridge persists overrides across random-port restarts and re
 test('hydration retries after a transient getItems failure instead of caching the failure', async () => {
   const { output } = applyPatches(SYNTH_BUNDLE, { flags: ['enable-developer-mode'] });
   let calls = 0;
-  const portLocal = new Map([['jetski.developer.customFlagOverrides', '{"disk-flag":true}']]);
 
   const ctx = vm.createContext({
-    D: { ExperimentWithVariantSchema: 'SchemaStub' },
-    $b: (_s, init) => ({ ...init }),
-    Yga: 'OverrideSchema',
-    sha: 'ReqSchema',
-    A: {},
-    Oi: () => ({}),
-    ayb: () => null,
-    dka: class {},
+    E: { ExperimentWithVariantSchema: 'SchemaStub' },
+    Wb: (_s, init) => ({ ...init }),
+    yia: 'OverrideSchema',
+    Uia: 'ReqSchema',
+    B: {},
+    Uy: 'ButtonStub',
+    Rla: () => {},
+    f: (fn) => fn,
+    jh: () => ({}),
+    NMb: () => null,
+    Mla: class {},
     e: (x) => x,
     console,
-    StorageEvent: class {},
     setTimeout,
     clearTimeout,
     Promise,
     window: {
-      localStorage: {
-        getItem: (k) => (portLocal.has(k) ? portLocal.get(k) : null),
-        setItem: (k, v) => portLocal.set(k, String(v)),
-        removeItem: (k) => portLocal.delete(k),
-      },
-      dispatchEvent: () => {},
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
       nativeStorage: {
         getItems: async () => {
           calls += 1;
@@ -463,14 +464,14 @@ test('hydration retries after a transient getItems failure instead of caching th
   assert.equal(calls, 2, 'the second attempt must actually hit the bridge again');
   assert.equal(ctx.__agyHydrateState, 'done');
   assert.equal(
-    portLocal.get('jetski.developer.customFlagOverrides'),
-    '{"recovered":true}',
+    ctx.__agyOvr('recovered', false),
+    true,
     'a later successful hydration must apply the disk value'
   );
 });
 
 test('a transient Mendel fetch error keeps the last-known-good live table', async () => {
-  const { output } = applyPatches(PATCH_MENDEL_BASELINE.anchor, {
+  const { output } = applyPatches(SYNTH_BASELINE_SNIPPET, {
     flags: ['enable-developer-mode'],
     patches: [PATCH_MENDEL_BASELINE],
   });
@@ -482,9 +483,9 @@ test('a transient Mendel fetch error keeps the last-known-good live table', asyn
   ];
 
   const ctx = vm.createContext({
-    D: { ExperimentWithVariantSchema: 'SchemaStub' },
-    $b: (_schema, init) => ({ ...init }),
-    sha: 'ReqSchema',
+    E: { ExperimentWithVariantSchema: 'SchemaStub' },
+    Wb: (_schema, init) => ({ ...init }),
+    Uia: 'ReqSchema',
     e: (x) => x,
     console,
     setTimeout,
@@ -501,12 +502,12 @@ test('a transient Mendel fetch error keeps the last-known-good live table', asyn
     },
   };
 
-  const first = await ctx.fka(provider);
+  const first = await ctx.Ola(provider);
   assert.equal(first['oauth-only-experiment']?.disabled, false);
   assert.equal(first['enable-ui-sidecars']?.disabled, true, 'live table must be preserved verbatim');
 
   mode = 'error';
-  const second = await ctx.fka(provider);
+  const second = await ctx.Ola(provider);
   assert.ok(
     second['oauth-only-experiment'],
     'a fetch failure must not discard the previously loaded OAuth table'
@@ -522,7 +523,7 @@ test('applyPatches fails closed on missing anchors and rejects double-patching',
   assert.throws(() => applyPatches(output, { flags: ['enable-developer-mode'] }), PatchError);
 });
 
-test('flagOverrideSync notifies listeners before the backend RPC settles', async () => {
+test('flagOverrideSync notifies listeners before the backend RPC settles and dispose unregisters', async () => {
   const { output } = applyPatches(SYNTH_BUNDLE, { flags: ['enable-developer-mode'] });
 
   let rpcResolve;
@@ -532,48 +533,53 @@ test('flagOverrideSync notifies listeners before the backend RPC settles', async
   let setStateCalls = 0;
 
   const ctx = vm.createContext({
-    D: { ExperimentWithVariantSchema: 'SchemaStub' },
-    $b: (_s, init) => ({ ...init }),
-    Yga: 'OverrideSchema',
-    sha: 'ReqSchema',
-    A: {},
-    Oi: () => ({}),
-    ayb: () => null,
-    // In the real bundle `dka` is a debounce/queue helper; here it simply keeps
-    // the wrapped callback so the test can invoke it explicitly.
-    dka: class {
+    E: { ExperimentWithVariantSchema: 'SchemaStub' },
+    Wb: (_s, init) => ({ ...init }),
+    yia: 'OverrideSchema',
+    Uia: 'ReqSchema',
+    B: {},
+    Uy: 'ButtonStub',
+    Rla: () => {},
+    f: (fn) => fn,
+    jh: () => ({}),
+    NMb: () => null,
+    Mla: class {
       constructor(fn) {
         this.run = fn;
+      }
+      set(m) {
+        this.desired = m;
+        return this.run(m);
       }
     },
     e: (x) => x,
     console,
-    StorageEvent: class {},
     setTimeout,
     clearTimeout,
     Promise,
     window: {
       localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-      dispatchEvent: () => {},
       nativeStorage: { getItems: async () => ({}), updateItems: async () => {} },
     },
   });
   vm.runInContext(output, ctx);
 
-  const jka = new ctx.jka({
+  const provider = new ctx.Tla({
     setMendelFlagOverrides: () => rpcPromise, // never settles yet
   });
-  jka.stateProvider = {
+  provider.stateProvider = {
     getState: () => ({}),
     setState: () => {
       setStateCalls += 1;
     },
+    dispose: () => {},
   };
 
-  const pending = jka.flagOverrideSync.run({ 'enable-ui-sidecars': false });
+  const pending = provider.flagOverrideSync.set({ 'enable-ui-sidecars': false });
   await Promise.resolve();
   await Promise.resolve();
 
+  assert.equal(ctx.__agyOvr('enable-ui-sidecars', true), false);
   assert.ok(
     setStateCalls >= 1,
     'listeners must be notified BEFORE the backend RPC resolves (no UI lag)'
@@ -581,7 +587,10 @@ test('flagOverrideSync notifies listeners before the backend RPC settles', async
 
   rpcResolve({});
   await pending;
-  assert.ok(setStateCalls >= 2, 'state is refreshed again after the RPC settles');
+  const beforeDispose = setStateCalls;
+  provider.dispose();
+  ctx.__agySetOvrMap({ 'enable-ui-sidecars': true });
+  assert.equal(setStateCalls, beforeDispose, 'disposed provider must no longer receive notifications');
 });
 
 test('unquoteDesktopExecToken round-trips the assignment verify() relies on', () => {
@@ -600,7 +609,7 @@ test('unquoteDesktopExecToken round-trips the assignment verify() relies on', ()
 
 test('PATCH_FLAG_PICKER handles braces inside string literals without truncation', () => {
   const tricky =
-    'function mtb({suggestedFlags:a,onAdd:b}){return A.createElement("div",null,"{unbalanced","}")}' +
+    'function EGb({suggestedFlags:a,onAdd:b}){return B.createElement("div",null,"{unbalanced","}",B.createElement(Uy,{variant:"outline",size:"sm"},"Add"))}' +
     ';function tailSentinel(){return 99}';
   const { output } = applyPatches(tricky, { patches: [PATCH_FLAG_PICKER] });
   assert.ok(output.endsWith(';function tailSentinel(){return 99}'));
@@ -878,14 +887,14 @@ test('repack tolerates ASAR link nodes and returns input untouched without repla
 // ---------------------------------------------------------------------------
 
 test('R2-01: a successful EMPTY Mendel list clears the cache instead of reusing last-known-good', async () => {
-  const { output } = applyPatches(PATCH_MENDEL_BASELINE.anchor, {
+  const { output } = applyPatches(SYNTH_BASELINE_SNIPPET, {
     flags: ['enable-developer-mode'],
     patches: [PATCH_MENDEL_BASELINE],
   });
   const ctx = vm.createContext({
-    D: { ExperimentWithVariantSchema: 'SchemaStub' },
-    $b: (_s, init) => ({ ...init }),
-    sha: 'ReqSchema',
+    E: { ExperimentWithVariantSchema: 'SchemaStub' },
+    Wb: (_s, init) => ({ ...init }),
+    Uia: 'ReqSchema',
     e: (x) => x,
     console,
     setTimeout,
@@ -908,46 +917,47 @@ test('R2-01: a successful EMPTY Mendel list clears the cache instead of reusing 
     },
   };
 
-  const live = await ctx.fka(provider);
+  const live = await ctx.Ola(provider);
   assert.equal(live['oauth-only']?.disabled, false);
 
   // Successful empty table must NOT resurrect the previous OAuth table.
   mode = 'empty';
-  const empty = await ctx.fka(provider);
+  const empty = await ctx.Ola(provider);
   assert.equal(empty['oauth-only'], undefined, 'success-empty must clear the cache');
   assert.equal(empty['enable-jetbox-terminal-v2']?.disabled, false, 'baseline is used instead');
 
   // A genuine failure still preserves the (now cleared) cache semantics.
   mode = 'error';
-  const err = await ctx.fka(provider);
+  const err = await ctx.Ola(provider);
   assert.equal(err['enable-jetbox-terminal-v2']?.disabled, false);
 });
 
-test('R2-02: local writes notify subscribers even when the RPC queue is busy', async () => {
+test('R2-02: local storageService writes notify subscribers even when the RPC queue is busy', async () => {
   const { output } = applyPatches(SYNTH_BUNDLE, { flags: ['enable-developer-mode'] });
   let notifications = 0;
   let rpcPending = [];
   const ctx = vm.createContext({
-    D: { ExperimentWithVariantSchema: 'SchemaStub' },
-    $b: (_s, init) => ({ ...init }),
-    Yga: 'OverrideSchema',
-    sha: 'ReqSchema',
-    A: {},
-    Oi: () => ({}),
-    ayb: () => null,
-    // A queue that never resolves: models dka serialising a second write.
-    dka: class {
+    E: { ExperimentWithVariantSchema: 'SchemaStub' },
+    Wb: (_s, init) => ({ ...init }),
+    yia: 'OverrideSchema',
+    Uia: 'ReqSchema',
+    B: {},
+    Uy: 'ButtonStub',
+    Rla: () => {},
+    f: (fn) => fn,
+    jh: () => ({}),
+    NMb: () => null,
+    Mla: class {
       constructor(fn) { this.run = fn; }
+      set(m) { return new Promise((res) => rpcPending.push(res)); }
     },
     e: (x) => x,
     console,
-    StorageEvent: class {},
     setTimeout,
     clearTimeout,
     Promise,
     window: {
       localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-      dispatchEvent: () => {},
       nativeStorage: {
         getItems: async () => ({}),
         updateItems: () => new Promise((res) => rpcPending.push(res)),
@@ -955,17 +965,18 @@ test('R2-02: local writes notify subscribers even when the RPC queue is busy', a
     },
   });
   vm.runInContext(output, ctx);
+  const { storageService } = await ctx.hhd({});
 
   ctx.__agyRegisterNotifier(() => {
     notifications += 1;
   });
 
-  // Two local writes in a row, with the first RPC still pending.
-  ctx.__agyAfterLocalWrite('jetski.developer.customFlagOverrides', '{"a":true}');
-  ctx.__agyAfterLocalWrite('jetski.developer.customFlagOverrides', '{}');
+  // Two local writes in a row (set -> reset), with nativeStorage.updateItems still pending.
+  storageService.store('jetski.developer.customFlagOverrides', '{"a":true}');
+  storageService.store('jetski.developer.customFlagOverrides', '{}');
   await Promise.resolve();
 
-  assert.equal(notifications, 2, 'every local write must notify, independent of the RPC queue');
+  assert.equal(notifications, 2, 'every distinct local write must notify immediately, independent of RPC/IPC');
 });
 
 test('R2-03: desktop encoding survives a real GLib-compatible reading of quotes/$/backtick', () => {
@@ -1000,57 +1011,33 @@ test('R2-05: parseLauncherAssignment follows env semantics and ignores decoy arg
   assert.equal(parseLauncherAssignment('Exec=env -u HOME AGY_UI_BUNDLE=/a /x').value, '/a');
 });
 
-test('R2-06: tombstones recorded before metadata is ready are merged, not overwritten', async () => {
-  const { output } = applyPatches(SYNTH_BUNDLE, { flags: ['enable-developer-mode'] });
-  const diskStore = {
-    'jetski.developer.__agyMeta': JSON.stringify({ v: 1, deleted: { 'other-flag': 1 } }),
-  };
-  const portLocal = new Map();
+test('structural anchors survive Closure Compiler identifier re-minification', () => {
+  const reminified = SYNTH_BUNDLE
+    .replace(/\bOla\b/g, 'Zza')
+    .replace(/\bWb\b/g, 'mkPb')
+    .replace(/\bUia\b/g, 'ReqPb')
+    .replace(/\bE\.ExperimentWithVariantSchema\b/g, 'P9.ExperimentWithVariantSchema')
+    .replace(/\bHi\b/g, 'syncR')
+    .replace(/\bIi\b/g, 'reactR')
+    .replace(/\bjh\b/g, 'mapSt')
+    .replace(/\bMla\b/g, 'SyncQ')
+    .replace(/\byia\b/g, 'OvrPb')
+    .replace(/\bRla\b/g, 'stopT')
+    .replace(/\bIT\b/g, 'secB')
+    .replace(/\bJT\b/g, 'secI')
+    .replace(/\bNMb\b/g, 'secCache')
+    .replace(/\bhhd\b/g, 'initClientStorage')
+    .replace(/\bfgd\b/g, 'NativeStoreImpl')
+    .replace(/\bEGb\b/g, 'FlagCombo')
+    .replace(/\bB\./g, 'ReactNs.')
+    .replace(/\bUy\b/g, 'OutlineBtn');
 
-  const ctx = vm.createContext({
-    D: { ExperimentWithVariantSchema: 'SchemaStub' },
-    $b: (_s, init) => ({ ...init }),
-    Yga: 'OverrideSchema',
-    sha: 'ReqSchema',
-    A: {},
-    Oi: () => ({}),
-    ayb: () => null,
-    dka: class { constructor(fn) { this.run = fn; } },
-    e: (x) => x,
-    console,
-    StorageEvent: class {},
-    setTimeout,
-    clearTimeout,
-    Promise,
-    window: {
-      localStorage: {
-        getItem: (k) => (portLocal.has(k) ? portLocal.get(k) : null),
-        setItem: (k, v) => portLocal.set(k, String(v)),
-        removeItem: (k) => portLocal.delete(k),
-      },
-      dispatchEvent: () => {},
-      nativeStorage: {
-        getItems: async () => ({ ...diskStore }),
-        updateItems: async (ch) => {
-          for (const [k, v] of Object.entries(ch)) diskStore[k] = v;
-        },
-      },
-    },
-  });
-  vm.runInContext(output, ctx);
-
-  // Delete another key BEFORE hydration has read the metadata.
-  ctx.__agyAfterLocalWrite('jetski.developer.featureEnvironmentOverride', null);
-  await ctx.__agyHydrateDevStorage();
-  await new Promise((r) => setTimeout(r, 0));
-
-  const meta = JSON.parse(diskStore['jetski.developer.__agyMeta']);
-  assert.equal(meta.deleted['other-flag'], 1, 'pre-existing tombstone must survive');
-  assert.equal(
-    meta.deleted['jetski.developer.featureEnvironmentOverride'],
-    1,
-    'the new tombstone must be recorded too'
-  );
+  const { output, results } = applyPatches(reminified, { flags: ['enable-developer-mode'] });
+  assert.equal(results.length, 4);
+  assert.ok(output.includes('async function Zza(a)'));
+  assert.ok(output.includes('function FlagCombo({suggestedFlags:a,onAdd:b})'));
+  assert.ok(output.includes('ReactNs.createElement(OutlineBtn,'));
+  assert.doesNotThrow(() => verifyJsSyntax(output));
 });
 
 test('R2-11: scanner refuses the documented silent-swallow counterexample', () => {

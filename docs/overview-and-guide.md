@@ -72,24 +72,25 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 
 `main.js` 中包含大量仅适用于 Google 内部环境（CitC / Cider / ABFS）或裁剪界面的开关（如 `project-4k` 会隐藏开发者工具），绝不能盲目全开。本工具采取最稳健的分层设计：
 
-1. **企业网关模式（`GetMendelFlags` 为空 `{}`）**：主通道 `fka()` 与次级通道 `lB().getMendelFlags` 经共享解析器 `__agyResolveExperiments()` 识别出服务端空表，清空旧缓存并自动回退注入该构建实测观测到的 **Google 原生账号线上开启基线**（41 项前端布尔开关 + 7 项参数配置，涵盖 `New Terminal`、V2 多标签右侧栏、`Extensions`、Git Diff 审查、PDF / Notebook 预览、分屏、全文搜索、快捷键自定义等）以及 **`enable-developer-mode`**；
+1. **企业网关模式（`GetMendelFlags` 为空 `{}`）**：主通道与次级通道经共享解析器 `__agyResolveExperiments()` 识别出服务端空表，清空旧缓存并自动回退注入实测观测到的 **Google 原生账号线上开启基线**（41 项前端布尔开关 + 7 项参数配置，涵盖 `New Terminal`、V2 多标签右侧栏、`Extensions`、Git Diff 审查、PDF / Notebook 预览、分屏、全文搜索、快捷键自定义等）以及 **`enable-developer-mode`**；
 2. **Google 原生账号模式（`GetMendelFlags` 非空）**：原样保留云端实时下发的完整实验表（实测快照共 384 项），仅额外确保 `enable-developer-mode` 开启；若运行期间偶遇单次网络抖动导致拉取抛错，两条通道均自动保留上一次成功的实时表（last-known-good）；
-3. **双向覆盖与实时响应**：在 `Settings -> Developer -> Custom Flags` 面板中，所有原生基线开启项初始均为默认开启态（`0 overrides`）。你可以随时手动**关掉**某项默认开关（标记 `forced off`，直读通道 `kj` / `IX` / `jj` / `FS` 同样实时生效），或通过底部向上展开的可滚动下拉框**添加**额外实验项（标记 `forced on`），点击 `Reset overrides` 即可随时一键回到纯净的 Google 原生基线。
+3. **双向覆盖与实时响应**：在 `Settings -> Developer -> Custom Flags` 面板中，所有原生基线开启项初始均为默认开启态（`0 overrides`）。你可以随时手动**关掉**某项默认开关（标记 `forced off`，直读布尔通道同样实时生效），或通过底部向上展开的可滚动下拉框**添加**额外实验项（标记 `forced on`），点击 `Reset overrides` 即可随时一键回到纯净的 Google 原生基线。
 
 ---
 
-### 1.5 为什么原版前端手动修改的开关重启后会丢失，而本工具能跨重启与重装软件包持久保留？
+### 1.5 为什么手动拨动实验开关时，本工具能让全部通道实时生效并跨随机端口与重装持久保留？
 
-**因为 `language_server` 每次启动使用随机回环端口（`--https_server_port 0`），导致基于 Origin 隔离的 `window.localStorage` 每次重启都被清空；本工具将其桥接到了 Electron 原生磁盘存储 `~/.config/Antigravity/app_storage.json`。**
+**因为 `language_server` 每次启动使用随机回环端口（`--https_server_port 0`），且服务端拒绝 `SetMendelFlagOverrides`；本工具将直读与次级 Mendel 通道统一绑定到了底层读写 `~/.config/Antigravity/app_storage.json` 的原生存储服务上。**
 
-- **原版缺陷根因**：Electron 主进程拉起 `language_server` 时传入 `--https_server_port 0`，内核每次随机分配一个新端口（如本次 `https://127.0.0.1:41823`，下次重启变为 `https://127.0.0.1:35910`）。Chromium 的同源策略按 `协议 + 主机 + 端口` 严格隔离 `localStorage`，因此新端口永远面对一片空白的 `localStorage`。
-- **本工具持久化闭环**：Electron 宿主的预加载脚本 `dist/preload.js` 已向渲染层暴露了跨端口共享的 `window.nativeStorage` IPC 接口，底层直接读写用户配置目录下的 **`~/.config/Antigravity/app_storage.json`**（Pacman 升级或重装 `/opt/Antigravity` 绝不会触碰该目录）。本工具在写入 `jetski.developer.*` 时自动同步调用 `nativeStorage.updateItems(...)` 落盘，并在每次启动拉取实验表前通过 `__agyHydrateDevStorage()` 将磁盘配置预热回填至当前随机端口的 `localStorage`，从而实现跨重启、跨升级的持久化。
+- **原版两处断点**：
+  1. Electron 主进程拉起 `language_server` 时传入 `--https_server_port 0`，每次随机分配新端口（如 `https://127.0.0.1:41823` → `https://127.0.0.1:35910`），使同源 `window.localStorage` 每次重启清空。`2.31` 起上游虽引入 `clientStorageFeature`（底层调用 `window.nativeStorage` 读写 `~/.config/Antigravity/app_storage.json`）保存常规 `customFlag`，但直读与次级通道仍未打通；
+  2. `Extensions` 菜单（`enable-ui-sidecars`）、浏览器子代理（`enable-browser-subagent-v2`）等 20 余项直读开关在原版中依赖后端 `SetMendelFlagOverrides` RPC 更新状态，而在公开构建下固定返回 `permission_denied`。
+- **本工具全通道闭环**：在 `Ola()` 拉取实验表前先通过 `__agyHydrateDevStorage()` 从 `window.nativeStorage` 预热磁盘覆盖表，随后通过跳板绑定 `clientStorageFeature`（`hhd()`）的 `storageService` 与 `flagOverrideSync`，使 `~/.config/Antigravity/app_storage.json`（Pacman 升级或重装 `/opt/Antigravity` 绝不会触碰该目录）中的覆盖项同时作用于全部三条数据轨道。
 - **关键工程加固（对用户可见的实际差异）**：
-  1. **连续拨动与重置即时生效**：每次本地覆盖写入直接通过 `__agyRegisterNotifier()` 广播刷新，与后端 `dka` RPC 队列完全解耦，连续快速拨动开关或点击 `Reset overrides` 均零延迟响应；
-  2. **写入串行合并与有界重试**：宿主 `app_storage.json` 为全表 read-modify-write，补丁侧通过串行合并队列防止并发写入互相覆盖，并在单次写入报错时保留未确认批次自动重试（最多 3 次，线性退避 `150 / 300 / 450 ms`）；
+  1. **连续拨动与重置即时生效**：每次本地覆盖更新直接通过 `__agyRegisterNotifier()` 同步广播刷新，与后端 RPC 队列完全解耦，连续快速拨动开关或点击 `Reset overrides` 均零延迟响应；
+  2. **零竞争复用宿主原生落盘队列**：直接挂载上游 `fgd(window.nativeStorage)` 的缓存与 `onDidChange` 事件流，不引入第二个竞争写进程；
   3. **读取失败与晚挂载桥接可重试**：预热读取带 `2000ms` 超时保护与 `8000ms` 桥接就绪宽限期，临时异常不会永久缓存，后续拉取可自动恢复；
-  4. **区分网络抖动与空表切换**：已获取 Google OAuth 实时实验表后，网络异常保留 last-known-good；而服务端明确返回空表（如切回网关模式）则立即清空旧缓存并启用静态基线；
-  5. **删除墓碑防旧值回灌**：通过 `jetski.developer.__agyMeta` 记录主动清除的键，避免被旧端口残留数据回灌。
+  4. **区分网络抖动与空表切换**：已获取 Google OAuth 实时实验表后，网络异常保留 last-known-good；而服务端明确返回空表（如切回网关模式）则立即清空旧缓存并启用静态基线。
 
 ---
 
@@ -101,8 +102,8 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 | **`Extensions` 与内置 `Terminal`** | 隐藏 | 默认可见（位于 `+` 菜单与 V2 右侧栏） | **开箱默认可见** |
 | **`Settings -> Developer` 面板** | 隐藏 | 隐藏 | **默认可见**（支持对任意开关做双向增减与一键重置） |
 | **未灰度实验项（如 `fileExplorerTab`）** | 隐藏 | 隐藏 | **可在 `Developer` 面板按需添加** |
-| **手动修改开关的持久化** | — | 仅写随机端口 `localStorage`，**重启即丢失** | **同步写入 `~/.config/Antigravity/app_storage.json`，重启与重装均保留（串行合并写入、失败有界重试）** |
-| **网络抖动时的实验表** | — | 原版 `fka()` 在失败时返回 `undefined`，下游 `ij` 保留已加载的表 | **主/次双通道在请求失败时均保留 last-known-good；服务端成功返回空表时清空旧缓存并采用静态基线** |
+| **手动修改开关的作用范围与持久化** | — | 面板隐藏；直读开关因 `SetMendelFlagOverrides` 权限拒绝无法本地覆盖 | **全通道实时响应覆盖，保存于 `~/.config/Antigravity/app_storage.json`，重启与重装均保留** |
+| **网络抖动时的实验表** | — | 原版主入口在失败时返回 `undefined`，下游保留已加载的表 | **主/次双通道在请求失败时均保留 last-known-good；服务端成功返回空表时清空旧缓存并采用静态基线** |
 | **开关候选框滚动体验** | — | 原生 `<datalist>` 弹窗白底且**无法滚动** | **深色主题向上展开，支持滚轮 / 键盘导航 / 自动滚动入视区，含 ARIA listbox 语义** |
 | **误删/误覆盖防护** | — | — | **`--dry-run` 绝对零写入；`extract` 拒绝非空目录；UI 切换双失败时保留旧副本并给出恢复路径** |
 | **是否修改 `language_server` 二进制** | 否 | 否 | **否**（纯内存只读提取内嵌 ZIP） |

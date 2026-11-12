@@ -9,8 +9,8 @@
 Antigravity 桌面端的界面控制逻辑位于 `language_server` 二进制内嵌的 `agy_hub_web_bundle` ZIP 归档（核心为约 11.2 MB 的压缩编译产物 `main.js`），而子进程启动参数则位于 `/opt/Antigravity/resources/app.asar` 的 `dist/languageServer.js` 中。为兼顾安全性、可维护性与多工具共存，`antigravity_uipatch.mjs` 遵循四项核心工程约束：
 
 1. **零外部依赖（纯 Node.js 标准库）**：完全基于 `node:fs`、`node:zlib`、`node:crypto`、`node:vm` 等内置模块实现 ASAR 归档打包、ZIP 中央目录解析、DEFLATE 解压、IEEE 802.3 CRC32 校验与 JavaScript 语法树预检，不依赖任何第三方 npm 包，也不依赖外部 `/usr/bin/unzip` 或 `@electron/asar` CLI。
-2. **字节级无损往返（Byte-Identical Round-Trip）**：对 `app.asar` 采用**原数据区零移动、仅尾部追加修改项**的打包算法。当替换映射为空时，`repack()` 直接返回原缓冲区（任意合法输入逐字节 100% 一致）；修改单一条目（`dist/languageServer.js`）时，原厂其余 `1,091` 个文件条目及任何前序第三方归档补丁的偏移量与字节流均分毫不差地原样保留。
-3. **严格故障闭合（Fail-Closed）与 V8 语法预检**：每处前端主锚点与子锚点均要求唯一精确匹配（`occurrences === 1`）；合成后的完整 `main.js` 必须通过 `new vm.Script(output)` 的 V8 引擎语法解析校验，才会进入 `app.asar` 改写与正式目录原子切换阶段。
+2. **字节级无损往返（Byte-Identical Round-Trip）**：对 `app.asar` 采用**原数据区零移动、仅尾部追加修改项**的打包算法。当替换映射为空时，`repack()` 直接返回原缓冲区（任意合法输入逐字节 100% 一致）；修改单一条目（`dist/languageServer.js`）时，原厂其余 `1,111` 个文件条目及任何前序第三方归档补丁的偏移量与字节流均分毫不差地原样保留。
+3. **结构化唯一签名匹配、故障闭合（Fail-Closed）与 V8 语法预检**：由于上游每次构建均由 Closure Compiler 重新分配短标识符名（如 `2.29` → `2.31` 中 `fka` → `Ola`、`mtb` → `EGb`、`A` → `B`），全部 4 处前端主锚点与子锚点均采用**基于不变方法名/字符串字面量与语法骨架的结构化正则**动态捕获符号名，并强制断言全文件唯一匹配（`matches.length === 1`）；合成后的完整 `main.js` 必须通过 `new vm.Script(output)` 的 V8 引擎语法解析校验，才会进入 `app.asar` 改写与正式目录原子切换阶段。
 4. **绝不触碰 `language_server` 二进制**：仅以只读方式扫描内存缓冲区提取内嵌 Web UI，确保与修改 Go 二进制机器码的 [`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock) 正交共存。
 
 ---
@@ -19,7 +19,7 @@ Antigravity 桌面端的界面控制逻辑位于 `language_server` 二进制内�
 
 ### 2.1 ASAR 二进制布局与 Chromium Pickle 头部
 
-Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON 目录树 + 连续无填充文件数据区结构（以 Pacman `mtree` 校验通过的 `antigravity 2.29.1-1` 原厂归档为例：共 `4,797,365` 字节，注入本工具钩子后为 `4,817,088` 字节；包含 `1,092` 个文件条目，其中 `745` 个为归档内打包条目、`347` 个标记为 `unpacked: true`）：
+Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON 目录树 + 连续无填充文件数据区结构（以 Pacman `mtree` 校验通过的 `antigravity 2.31.0-1` 原厂归档为例：共 `5,274,972` 字节，注入本工具钩子后为 `5,294,695` 字节；包含 `1,112` 个文件条目，其中 `765` 个为归档内打包条目、`347` 个标记为 `unpacked: true`）：
 
 ```text
 偏移区间               类型 / 内容说明
@@ -50,7 +50,7 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 4. 出现在 `replacements` 中的条目（仅普通条目 `dist/languageServer.js`）：将其新字节流追加至 `dataEnd` 之后，更新该节点的 `offset`、`size`，并按 `4 MiB` 分块重新计算 `SHA256` `integrity`（`hash` 与 `blocks` 数组）；
 5. 将原始数据区 `[dataOffset, dataOffset + dataEnd)` 原封不动拷贝至新头部之后，并在末尾拼接追加块。
 
-> **Electron Fuses 实测确认**：扫描 `/opt/Antigravity/antigravity` 主程序中的 Fuse 哨兵 `dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX`（位于偏移 `37,014,720`）可见：`EnableEmbeddedAsarIntegrityValidation = DISABLED (0)`、`OnlyLoadAppFromAsar = DISABLED (0)`。Linux 发行版未启用宿主内置 ASAR 签名锁死，但同步更新节点内的 `integrity` 哈希可确保元数据始终自洽。
+> **Electron Fuses 实测确认**：扫描 `/opt/Antigravity/antigravity` 主程序（`2.31.0-1` 为 `228,826,440` 字节）中的 Fuse 哨兵 `dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX`（位于偏移 `37,183,328`）可见：`EnableEmbeddedAsarIntegrityValidation = DISABLED (0)`、`OnlyLoadAppFromAsar = DISABLED (0)`。Linux 发行版未启用宿主内置 ASAR 签名锁死，但同步更新节点内的 `integrity` 哈希可确保元数据始终自洽。
 
 ### 2.3 `dist/languageServer.js` 惰性环境变量钩子
 
@@ -91,12 +91,12 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 ## 3. 双内嵌 ZIP 归档识别与纯内存 CRC32 解压器
 
-`language_server`（`196,043,152` 字节）内部通过 Go `embed.FS` 嵌入了**两个**独立的 ZIP 归档（以 `CL 1015941558` 实测为例）：
+`language_server`（`206,811,536` 字节）内部通过 Go `embed.FS` 嵌入了**两个**独立的 ZIP 归档（以 `CL 1017595969` 实测为例）：
 
 | 归档序号 | 二进制起始偏移 | 条目数 | 压缩体积 | 内容示例 | 真实用途 |
 |---:|---:|---:|---:|---|---|
-| **ZIP #1** | `80,852,037` (`0x4d1b445`) | `598` | `408,467 B` | `Africa/Abidjan`, `Asia/Shanghai` | Go 运行时内嵌时区库（`tzdata`） |
-| **ZIP #2** | `164,809,256` (`0x9d2ca28`) | `548` | `5,628,057 B` | `index.html`, `main.js`, `compiled_tailwind.css` | **桌面端 Web UI（`agy_hub_web_bundle`）** |
+| **ZIP #1** | `85,407,207` (`0x51735e7`) | `598` | `408,467 B` | `Africa/Abidjan`, `Asia/Shanghai` | Go 运行时内嵌时区库（`tzdata`） |
+| **ZIP #2** | `175,360,377` (`0xa73c979`) | `548` | `5,863,968 B` | `index.html`, `main.js`, `compiled_tailwind.css` | **桌面端 Web UI（`agy_hub_web_bundle`）** |
 
 `findWebBundleZip(binBuf)` 从二进制末尾向前枚举全部 EOCD 候选（`PK\x05\x06`，`0x06054b50`；容器二进制启用 `allowTrailing: true`，不套用独立归档“EOCD 必须落在文件末 64 KiB 内”的假设），对每个候选由 `cdSize` 与 `cdOffset` 反推归档起点 $\text{start} = \text{eocd} - \text{cdSize} - \text{cdOffset}$，验证起点处的本地文件头签名（`PK\x03\x04`，`0x04034b50`），随后**完整校验**中央目录结构并精确选取同时包含 `index.html` 与 `main.js` 的归档。单个候选校验失败会继续向前扫描，因此注释中伪造的诱饵 EOCD 无法遮蔽真实归档；该算法不依赖硬编码偏移量，跨版本编译后依然稳健。
 
@@ -113,21 +113,20 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 ---
 
-## 4. `main.js` 四处前端汇聚点补丁详解
+## 4. `main.js` 四处结构化前端汇聚点补丁详解
 
-在提取出的 `548` 个归档条目（`540` 个文件 + `8` 个目录）中，除 `main.js` 外的其余 `539` 个文件保持原厂字节不变，仅对核心包 `main.js`（原版 `11,188,738` 字节 → 修补后 `11,199,216` 字节）施加以下 **4 处唯一锚点补丁**：
+在提取出的 `548` 个归档条目（`540` 个文件 + `8` 个目录）中，除 `main.js` 外的其余 `539` 个文件保持原厂字节不变，仅对核心包 `main.js`（`2.31.0-1` 原版 `11,871,831` 字节 → 修补后 `11,882,127` 字节）施加以下 **4 处结构化唯一锚点补丁**（以下括号内符号以 `CL 1017595969` 构建为例，实际运行期均由 `matchUnique()` / `resolveUniqueIdentifier()` 自动从语法结构捕获）：
 
-### 4.1 补丁 1：`mendel-native-baseline`（`fka()` 持久化预热 + Google 原生基线回退）
+### 4.1 补丁 1：`mendel-native-baseline`（`Ola()` 启动预热 + Google 原生基线回退）
 
-`MendelExperimentProvider` 的唯一拉取入口 `fka(a)` 负责请求 `a.getMendelFlags($b(sha, {}))` 并构造实验键值字典。该补丁在 `fka(a)` 上方注入辅助运行时并改造拉取流程：
+`MendelExperimentProvider` 的主拉取入口（`Ola(a)`）负责请求 `a.getMendelFlags(Wb(Uia, {}))` 并构造实验键值字典。该补丁自动捕获函数名、Protobuf 消息构造器（`Wb`）、请求 Schema（`Uia`）与 `ExperimentWithVariantSchema` 命名空间（`E`），注入辅助运行时并改造拉取流程：
 
 1. **启动期异步预热 `__agyHydrateDevStorage()`**：
-   - 在 `fka(a)` 返回实验表之前首先 `await __agyHydrateDevStorage()`；
-   - 通过 Electron 预加载桥接 `window.nativeStorage.getItems()` 读取 `~/.config/Antigravity/app_storage.json` 中的 `jetski.developer.customFlagOverrides` 与 `jetski.developer.featureEnvironmentOverride`，回填至当前随机端口的 `window.localStorage` 并派发 `StorageEvent` 唤醒 `mk()` 状态钩子（若首次升级时当前端口 `localStorage` 已有未删旧数据而磁盘尚无记录，则自动反向入队 `updateItems` 迁移落盘）。
-   - **可重试与有界超时语义**：只有 `pending`（进行中）与 `done`（已完成）两种状态会被保持；IPC 抛错或读取超时（`__AGY_HYDRATE_TIMEOUT = 2000ms`）会在 `catch` 中将状态复位为 `idle`，使下一次调用真正重试。当 `window` 存在但 `window.nativeStorage.getItems` 尚未出现时，自首次缺失时刻 `__agyFirstMiss` 起在 `__AGY_BRIDGE_GRACE`（`8000ms`）宽限期内保持 `idle` 以便晚挂载的桥接重试；超过宽限期仍无桥接（或无 `window` 对象）则置为 `done`。
-   - **旧快照不覆盖新编辑**：hydrate 完成前发生的本地写入登记在 `__agyDirty` 中，磁盘快照返回后这些键以当前本地值为准并反向入队落盘，避免延迟返回的旧快照覆盖用户刚做的修改。
+   - 在 `Ola(a)` 返回实验表之前首先 `await __agyHydrateDevStorage()`（避免主 Mendel 表先于 `clientStorageFeature` 初始化返回时丢失本地覆盖）；
+   - 通过 Electron 预加载桥接 `window.nativeStorage.getItems()` 读取 `~/.config/Antigravity/app_storage.json` 中的 `jetski.developer.customFlagOverrides`，解析同步至内存覆盖字典 `__agyOvrMap`；
+   - **可重试与有界超时语义**：IPC 抛错或读取超时（`__AGY_HYDRATE_TIMEOUT = 2000ms`）会在 `catch` 中将状态复位为 `idle`，使下一次调用真正重试；当 `window` 存在但 `window.nativeStorage.getItems` 尚未出现时，在 `__AGY_BRIDGE_GRACE`（`8000ms`）宽限期内保持 `idle` 允许晚挂载桥接重试，超过宽限期则回退读取同源 `window.localStorage` 并置为 `done`。若此时 `hhd()` 已完成 `storageService` 绑定（`__agyStorageBound === true`），预热快照自动让位，绝不覆盖实时状态。
 2. **基线归一化 `__agyNormalizeMendel(list)`**：
-   - 通过 `@bufbuild/protobuf` 消息构造器 `$b(D.ExperimentWithVariantSchema, ...)` 构造合法 Protobuf 实例，满足前端每 5 分钟轮询的 `Tja(D.ExperimentWithVariantSchema, ...)` 结构相等性校验；
+   - 通过捕获到的 Protobuf 消息构造器构造合法 `ExperimentWithVariantSchema` 实例，满足前端每 5 分钟轮询的结构相等性校验；
    - **当输入列表为空 `[]`**：自动回退构造 Google 原生账号线上实测开启的全部 **41 项前端布尔开关**（`NATIVE_MENDEL_BOOL_FLAGS`）+ **7 项字符串载荷配置**（`NATIVE_MENDEL_STRING_FLAGS`，如 `max-media-attachments = "15"`、`max-best-of-n = "10"` 等）+ **`enable-developer-mode`**；
    - **当输入列表非空**：原样保留云端下发的完整实验列表，仅确保 `enable-developer-mode` 处于 `disabled: false`。
 3. **双通道共享解析策略 `__agyResolveExperiments(raw)`**：
@@ -135,43 +134,36 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
    - **成功但返回空数组 `[]`**（在网关模式下，服务端返回 `{"experimentConfig":{}}`，经 Protobuf 解码后 `experiments` 默认补全为空数组 `[]`）→ 视为服务端撤回实验表（如切换账号或切入网关模式），**清空 `__agyLastGood = null` 并返回 `[]`**，继而由 `__agyNormalizeMendel([])` 启用静态原生基线；
    - **请求失败（`ok === false` 传入 `undefined`，或顶层缺少整个 `experimentConfig` 子消息）** → 返回 `__agyLastGood || []`，使偶发网络抖动保留已加载的实时表，待网络恢复后自动衔接线上状态。
 
-由于该归一化位于 `ika(gj())` 上游，`baselineRuntimeEnvironment.customFlags`（`enabledByDefault`）天然与 Google 原生账号保持一致：在 `Settings -> Developer -> Custom Flags` 面板中，所有默认开启项初始均呈现为 `0 overrides`，且自动激活了原生的 `sub()` 防锁死保护（`getBaseline("developerMode").enabled === true`）。
+由于该归一化位于 `Sla(Fi())` 上游，`baselineRuntimeEnvironment.customFlags`（`enabledByDefault`）天然与 Google 原生账号保持一致：在 `Settings -> Developer -> Custom Flags` 面板中，所有默认开启项初始均呈现为 `0 overrides`，且自动激活了原生的防锁死保护（`getBaseline("developerMode").enabled === true`）。
 
-### 4.2 补丁 2：`mendel-service-wrapper`（`lB().getMendelFlags` 次级通道统一接入）
+### 4.2 补丁 2：`mendel-service-wrapper`（`Qt().getMendelFlags` 次级通道统一接入）
 
-前端除 `MendelExperimentProvider` 外，还存在一套供 `FS(flag)` 与 `GS(flag, defaultInt)` 钩子（如内联生成式 UI 开关 `jetski-generative-ui`、浏览器子代理 `enable-browser-subagent-v2`、附件上限 `max-media-attachments` 等）使用的 `lB().getMendelFlags` 包装器。
+前端除 `MendelExperimentProvider` 外，还存在一套供 `IT(flag)` 与 `JT(flag, defaultInt)` 钩子（如内联生成式 UI 开关 `jetski-generative-ui`、浏览器子代理 `enable-browser-subagent-v2`、附件上限 `max-media-attachments` 等）使用的次级 `getMendelFlags` 包装器。
 
-`PATCH_MENDEL_SERVICE` 为该包装器补齐了内部 `try/catch` 异常捕获（记录布尔标志 `ok`），并将返回值统一改写为 `__agyNormalizeMendel(__agyResolveExperiments(ok ? x : void 0))`。因此，**主通道 `fka()` 与次级通道 `lB().getMendelFlags` 完全共用同一份 `__agyLastGood` 缓存、同一套“成功空表清缓存 / 失败保留上次可用表”策略以及同一份静态基线**。
+`PATCH_MENDEL_SERVICE` 为该包装器补齐了内部 `try/catch` 异常捕获（记录布尔标志 `ok`），并将返回值统一改写为 `__agyNormalizeMendel(__agyResolveExperiments(ok ? x : void 0))`。因此，**主通道与次级通道完全共用同一份 `__agyLastGood` 缓存、同一套“成功空表清缓存 / 失败保留上次可用表”策略以及同一份静态基线**。
 
-### 4.3 补丁 3：`mendel-local-overrides`（全通道双向覆盖响应 + `window.nativeStorage` 实时落盘）
+### 4.3 补丁 3：`mendel-local-overrides`（全通道双向覆盖响应 + `clientStorageFeature` 实时绑定）
 
-原版前端在持久化与覆盖传递上存在两处结构性缺陷：
-1. **随机端口导致 `localStorage` 每次重启清空**：桌面端每次启动均以 `--https_server_port 0` 在随机端口（`https://127.0.0.1:<port>`）提供 UI，而 Chromium 按 `协议 + 主机 + 端口` 隔离 `window.localStorage`。原版 `mk("jetski.developer.customFlagOverrides")` 仅写入 `localStorage`，导致每次重启或重装客户端后手动修改全部丢失。
-2. **直读 Mendel 开关不走 `ela()`**：`kj()`、`IX()`、`jj()` 与 `FS()` 原本依赖后端 `SetMendelFlagOverrides` RPC 更新 `stateProvider`，在非 `dev_mode` 下被 `permission_denied` 阻断。
+`antigravity 2.31` 引入了内置的 `clientStorageFeature`（由 `hhd()` 初始化 `fgd(window.nativeStorage)`，将 `usePersistentState` 钩子 `jj(...)` 持久化至 `~/.config/Antigravity/app_storage.json`），从而原生解决了 `FeatureManagerV2` 常规 `customFlag` 跨随机端口保留的问题；但**全部直读与次级 Mendel 布尔通道**（`Hi`、`Ii`、`CKc`、`IT`）依然直接读取实验对象的 `!d.disabled`，且原版更新路径依赖被后端 `dev_mode == false` 硬性拒绝的 `SetMendelFlagOverrides` RPC，导致在面板中拨动 `enable-ui-sidecars`、`enable-browser-subagent-v2` 等开关时直读通道完全无响应。
 
-`PATCH_MENDEL_OVERRIDES` 精确校验并改写 **5 个唯一子锚点**，彻底打通闭环：
+`PATCH_MENDEL_OVERRIDES` 精确匹配并改写 **6 个唯一结构化锚点**，在不与上游 `fgd` 竞争写入 `app_storage.json` 的前提下打通全通道实时覆盖：
 
-| 子锚点标识 | 原版代码位置 | 补丁改写逻辑与作用 |
+| 结构锚点标识 | 原版代码特征（`2.31` 符号） | 补丁改写逻辑与作用 |
 |---|---|---|
-| `jj`（主锚点） | `function jj(a,b){return(a=a.experiments[b])?!a.disabled:!1}` | 外包 `__agyOvr(b, ...)`，使同步布尔读取优先采纳本地覆盖值 |
-| `kj` | `Oi(a.stateProvider,d=>(d=d[b])?!d.disabled:!1)` | 外包 `__agyOvr(b, ...)`，使全部 `kj()` / `IX()` 响应式布尔流实时响应覆盖（不篡改 `stateProvider` 基线字典） |
-| `flagOverrideSync` | `this.lsClient.setMendelFlagOverrides(...)` | 在 `jka` 构造时通过 `__agyRegisterNotifier(...)` 注册刷新回调并将返回的注销函数保存在 `this.__agyDisposeNotifier` 上；同时在 `flagOverrideSync` 发起 best-effort RPC 前后各刷新一次 `stateProvider`（内层 `try/catch` 吞掉预期的 `permission_denied`）。由于每次本地写入都会由 `__agyAfterLocalWrite()` 直接触发 `__agyNotify()`，即使 `dka` 队列中前一次 RPC 尚未返回，后续连续拨动或 `Reset overrides` 也能立即更新界面 |
-| `FS` | `var FS=a=>(a=ayb(a))?!a.disabled:!1,` | 外包 `__agyOvr(a, ...)`，使次级通道布尔读取同样响应本地覆盖 |
-| `mkStorageWrite` | `t===null?window.localStorage.removeItem(a):window.localStorage.setItem(a,t);` | 当键名以 `"jetski.developer."` 开头时调用 `__agyAfterLocalWrite(a, t)`：标记 `__agyDirty` → 更新删除墓碑 → 入队 `__agyPersist()` → 立即 `__agyNotify()` 通知全体订阅者 |
-
-**落盘路径的三项工程保证**（针对异步 IPC 与宿主的 read-modify-write 语义）：
-
-1. **串行 + 合并写入队列与线性有界重试**：`__agyPersist()` 将并发写入合并至单个 `__agyPending` 批次，由 `__agyPump()` 串行发送，前一次 `updateItems` 落定后才发下一批，规避宿主 `StorageManager` 全表 read-modify-write 在并发调用时互相覆盖丢更新的问题。所有 Promise 均挂接 `then/catch`（无 `unhandledRejection`）；若写入报错，未确认批次会保留并垫在更新写入之下，记录 `__agyPersistErr` 后执行最多 **3 次自动重试**（线性退避 `150 * __agyRetry`，即 `150 / 300 / 450 ms`），重试成功且无积压批次时清除错误状态。对于底层永不返回的挂起调用，为保证写入顺序不执行并发超时重发。
-2. **删除墓碑（Tombstone）机制**：`mk()` 传入 `null` 删除键时，除将 `null` 写入磁盘外，还将墓碑集合持久化到 `jetski.developer.__agyMeta`，使“用户主动删除”与“从未迁移”可明确区分，防止旧端口残留值在 hydrate 时回灌。若删除发生在磁盘元数据读回之前，先标记 `__agyTombDirty`，待读回磁盘墓碑后做并集再回写（注：若在预热完成前对同一键先删后恢复，并集合并可能保留一条历史墓碑记录，但因 hydrate 时有效字符串值优先于墓碑分支，不影响正常读取结果）。
-3. **`__agyDirty` 防旧快照覆盖**：hydrate 进行中发生的本地写入记入 `__agyDirty`；磁盘快照返回后，dirty 键以本地当前值为准并反向同步落盘。
+| `syncBool`（主锚点） | `function Hi(a,b){return(a=a.experiments[b])?!a.disabled:!1}` | 外包 `__agyOvr(b, ...)`，使同步布尔读取优先采纳本地覆盖值 |
+| `reactiveBool` | `Ii` 内 `jh(a.stateProvider,d=>(d=d[b])?!d.disabled:!1)` | 外包 `__agyOvr(b, ...)`，使全部 `Ii()` / `CKc()` 响应式布尔流实时响应覆盖（不篡改 `stateProvider` 基线字典） |
+| `flagOverrideSync` | `Tla` 构造器内 `this.flagOverrideSync=new Mla(...)` | 注册刷新回调至 `this.__agyDisposeNotifier`，包装 `this.flagOverrideSync.set(m)` 使其在入队 RPC 前同步调用 `__agySetOvrMap(m)` 触发即时通知，并在 best-effort RPC 前后刷新 `stateProvider`（内层 `try/catch` 吞掉预期的 `permission_denied`） |
+| `providerDispose` | `Tla.prototype.dispose()` | 在释放 `stateProvider` 前自动调用 `this.__agyDisposeNotifier()`，避免多实例重建时残留回调 |
+| `secondaryBool` | `var IT=a=>(a=NMb(a))?!a.disabled:!1,` | 外包 `__agyOvr(a, ...)`（保持左值先执行 `NMb(a)` 以遵守 React Hooks 顺序规则），使次级通道布尔读取同样响应本地覆盖 |
+| `storageInit` | `async function hhd(a){...}` | 通过函数头跳板外包 `__agyBindStorage(await __agyRawStorageInit(a))`：在 `storageService` 初始化完成后立即同步当前 `customFlagOverrides`、执行一次性同源旧 `localStorage` 迁移，并订阅 `storageService.onDidChange`（涵盖本地拨动、`Reset overrides` 及跨窗口 `nativeStorage.onChanged` 广播） |
 
 ### 4.4 补丁 4：`flag-picker-scrollable`（`Developer` 面板向上可滚动开关选择器）
 
-原版 `Settings -> Developer` 底部用于开启新开关的组件 `mtb({ suggestedFlags: a, onAdd: b })` 使用了浏览器原生 `<input list="custom-flag-suggestions">` + `<datalist>`。在 Linux Electron / Chromium 下，原生 `<datalist>` 弹窗存在两处严重缺陷：
+原版 `Settings -> Developer` 底部用于开启新开关的组件（`EGb({ suggestedFlags: a, onAdd: b })`）使用了浏览器原生 `<input list="custom-flag-suggestions">` + `<datalist>`。在 Linux Electron / Chromium 下，原生 `<datalist>` 弹窗存在两处严重缺陷：
 1. 强制渲染为纯白背景黑字，完全脱离宿主深色主题；
 2. **不支持滚轮滚动**，候选开关超出屏幕高度后被直接截断，用户无法浏览完整列表。
 
-`PATCH_FLAG_PICKER` 通过带引号转义跳过的**两阶段括号扫描器**精确定位 `mtb` 函数体起止位置（第 1 阶段 `findMatchingParen` 配对圆括号 `(...)` 安全跳过解构形参 `{suggestedFlags:a,onAdd:b}`，第 2 阶段 `findMatchingBrace` 配对花括号 `{...}` 定位函数体边界），将其整体替换为基于宿主已编译 Tailwind 工具类的受控 Combobox 组件：
+`PATCH_FLAG_PICKER` 通过带引号转义跳过的**两阶段括号扫描器**精确定位函数体起止位置（第 1 阶段 `findMatchingParen` 配对圆括号 `(...)` 安全跳过解构形参 `{suggestedFlags:a,onAdd:b}`，第 2 阶段 `findMatchingBrace` 配对花括号 `{...}` 定位函数体边界），再从原函数体中唯一提取宿主当前编译产物的 React 命名空间符号（如 `B`）与按钮组件符号（如 `Uy`），将其整体替换为基于宿主已编译 Tailwind 工具类的受控 Combobox 组件：
 
 - **向上锚定不裁切**：输入框位于设置页底部，下拉框采用 `absolute left-0 right-0 bottom-full mb-1 z-50`，底边紧贴输入框上沿向上展开；
 - **固定上限平滑滚动**：采用 `max-h-64 overflow-y-auto`（最大高度 `16rem / 256px`），支持鼠标滚轮浏览全部候选开关；键盘高亮项通过 `scrollIntoView({ block: 'nearest' })` **自动滚动入视区**；

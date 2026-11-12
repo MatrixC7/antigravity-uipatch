@@ -261,8 +261,10 @@ export async function runLiveVerification(opts) {
       ],
       ['direct Mendel local override hook (__agyOvr) (static)', jsText.includes('__agyOvr(b,(d=d[b])?!d.disabled:!1)')],
       [
-        'nativeStorage hydrate + queued persist bridge (static)',
-        jsText.includes('__agyHydrateDevStorage') && jsText.includes('__agyPersist') && jsText.includes('__agyAfterLocalWrite'),
+        'clientStorageFeature + nativeStorage override bridge (static)',
+        jsText.includes('__agyHydrateDevStorage') &&
+          jsText.includes('__agyBindStorage') &&
+          jsText.includes('__agyRawStorageInit'),
       ],
       [
         'success-empty clears cache / fetch error keeps last-known-good (static)',

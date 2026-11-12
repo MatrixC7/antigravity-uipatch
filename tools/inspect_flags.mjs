@@ -83,7 +83,30 @@ export function parseFrontendFlags(js) {
     addCustom(m[1], 'customFlags.includes', null);
   }
 
-  // 2. Direct MendelExperimentProvider & secondary readers: kj / IX / jj / FS / GS / mj / experiments[]
+  // 2. Direct MendelExperimentProvider & secondary readers (resolved dynamically
+  //    from their structural definitions in `main.js`, with legacy symbol fallbacks
+  //    for minimal synthetic test snippets).
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const syncSym =
+    /function ([A-Za-z0-9_$]+)\(a,b\)\{return\(a=a\.experiments\[b\]\)\?!a\.disabled:!1\}/.exec(js)?.[1] ??
+    'jj';
+  const reactSym =
+    /function ([A-Za-z0-9_$]+)\(a,b\)\{var c=a\.experimentEnabledProviders\.get\(b\);/.exec(js)?.[1] ??
+    'kj';
+  const strSym =
+    /function ([A-Za-z0-9_$]+)\(a\)\{var b=[A-Za-z0-9_$]+\(\),c=b\.experimentStringProviders\.get\(a\);/.exec(
+      js
+    )?.[1] ?? 'mj';
+  const hookSym =
+    new RegExp(`(?:var|const|let)\\s+([A-Za-z0-9_$]+)=a=>\\{var b=${escapeRe(reactSym)}\\(`).exec(js)?.[1] ??
+    'IX';
+  const secMatch =
+    /var ([A-Za-z0-9_$]+)=a=>\(a=([A-Za-z0-9_$]+)\(a\)\)\?!a\.disabled:!1,([A-Za-z0-9_$]+)=\(a,b\)=>\{var c=\2\(a\)/.exec(
+      js
+    );
+  const secBoolSym = secMatch?.[1] ?? 'FS';
+  const secIntSym = secMatch?.[3] ?? 'GS';
+
   const mendel = [];
   const seenMendel = new Set();
   const pushMendel = (reader, flag) => {
@@ -93,23 +116,27 @@ export function parseFrontendFlags(js) {
     mendel.push({ reader, flag });
   };
 
-  for (const m of js.matchAll(/\bkj\s*\(\s*[A-Za-z0-9_$]+\s*,\s*"([^"]+)"\s*\)/g)) {
-    pushMendel('kj (reactive bool)', m[1]);
+  for (const m of js.matchAll(
+    new RegExp(`\\b${escapeRe(reactSym)}\\s*\\(\\s*[A-Za-z0-9_$]+(?:\\(\\))?\\s*,\\s*"([^"]+)"\\s*\\)`, 'g')
+  )) {
+    pushMendel(`${reactSym} (reactive bool)`, m[1]);
   }
-  for (const m of js.matchAll(/\bIX\s*\(\s*"([^"]+)"\s*\)/g)) {
-    pushMendel('IX (kj hook)', m[1]);
+  for (const m of js.matchAll(new RegExp(`\\b${escapeRe(hookSym)}\\s*\\(\\s*"([^"]+)"\\s*\\)`, 'g'))) {
+    pushMendel(`${hookSym} (reactive hook)`, m[1]);
   }
-  for (const m of js.matchAll(/\bjj\s*\(\s*[A-Za-z0-9_$]+\s*,\s*"([^"]+)"\s*\)/g)) {
-    pushMendel('jj (sync bool)', m[1]);
+  for (const m of js.matchAll(
+    new RegExp(`\\b${escapeRe(syncSym)}\\s*\\(\\s*[A-Za-z0-9_$]+(?:\\(\\))?\\s*,\\s*"([^"]+)"\\s*\\)`, 'g')
+  )) {
+    pushMendel(`${syncSym} (sync bool)`, m[1]);
   }
-  for (const m of js.matchAll(/\bFS\s*\(\s*"([^"]+)"\s*\)/g)) {
-    pushMendel('FS (rpc bool hook)', m[1]);
+  for (const m of js.matchAll(new RegExp(`\\b${escapeRe(secBoolSym)}\\s*\\(\\s*"([^"]+)"\\s*\\)`, 'g'))) {
+    pushMendel(`${secBoolSym} (rpc bool hook)`, m[1]);
   }
-  for (const m of js.matchAll(/\bGS\s*\(\s*"([^"]+)"\s*,/g)) {
-    pushMendel('GS (rpc int hook)', m[1]);
+  for (const m of js.matchAll(new RegExp(`\\b${escapeRe(secIntSym)}\\s*\\(\\s*"([^"]+)"\\s*,`, 'g'))) {
+    pushMendel(`${secIntSym} (rpc int hook)`, m[1]);
   }
-  for (const m of js.matchAll(/\bmj\s*\(\s*"([^"]+)"\s*\)/g)) {
-    pushMendel('mj (string payload)', m[1]);
+  for (const m of js.matchAll(new RegExp(`\\b${escapeRe(strSym)}\\s*\\(\\s*"([^"]+)"\\s*\\)`, 'g'))) {
+    pushMendel(`${strSym} (string payload)`, m[1]);
   }
   for (const m of js.matchAll(/\.experiments\[\s*"([^"]+)"\s*\]/g)) {
     pushMendel('experiments[] (raw)', m[1]);
@@ -125,7 +152,11 @@ export function parseFrontendFlags(js) {
 
   mendel.sort((a, b) => a.reader.localeCompare(b.reader) || a.flag.localeCompare(b.flag));
 
-  return { customFlags, mendel };
+  return {
+    customFlags,
+    mendel,
+    symbols: { reactSym, hookSym, syncSym, secBoolSym, secIntSym, strSym },
+  };
 }
 
 function parseCli(argv) {
@@ -160,7 +191,7 @@ export function main(argv = process.argv.slice(2)) {
   }
   const mainEntry = found.entries.find((e) => e.name === 'main.js');
   const js = readZipEntry(found.zip, mainEntry).toString('utf8');
-  let { customFlags, mendel } = parseFrontendFlags(js);
+  let { customFlags, mendel, symbols } = parseFrontendFlags(js);
 
   if (opts.filter) {
     const q = opts.filter;
@@ -193,7 +224,8 @@ export function main(argv = process.argv.slice(2)) {
   console.log(`Summary: ${customFlags.length} customFlag gate(s), ${mendel.length} direct Mendel reader(s)\n`);
 
   if (mendel.length > 0) {
-    console.log('=== Direct Mendel & Secondary Readers (kj / IX / jj / FS / GS / mj / experiments[]) ===');
+    const hdr = `${symbols.reactSym} / ${symbols.hookSym} / ${symbols.syncSym} / ${symbols.secBoolSym} / ${symbols.secIntSym} / ${symbols.strSym} / experiments[]`;
+    console.log(`=== Direct Mendel & Secondary Readers (${hdr}) ===`);
     for (const m of mendel) {
       console.log(`  ${m.reader.padEnd(22)} ${m.flag}`);
     }
