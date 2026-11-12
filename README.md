@@ -84,6 +84,9 @@ node antigravity_uipatch.mjs verify
 - 开箱即享与 Google 原生账号一致的全部默认功能（右上角 `+` 菜单已包含 `New Terminal`、`Browser`、`Extensions` 等）；
 - 如需进一步增减实验开关，进入 **`Settings -> Developer -> Custom Flags`** 即可直接拨动已有开关或通过底部向上展开的选择器添加新开关（完整开关状态与推荐配置见 [《实验特性开关全景目录》](docs/custom-flags-catalog.md)）。
 
+> [!NOTE]
+> **启动方式说明（桌面菜单 vs. 终端命令行）**：`install` 已自动将 `env AGY_UI_BUNDLE=<ui-dir>` 写入 `~/.local/share/applications/antigravity.desktop` 的 `Exec=` 行并刷新桌面缓存，因此**从系统应用菜单 / 图标点击启动时无需手动指定环境变量**。若你习惯在终端直接运行命令启动（不经过 `.desktop` 文件），由于 `app.asar` 钩子仅在检测到该变量时才挂载外置 UI，请执行 `AGY_UI_BUNDLE="$HOME/.local/share/antigravity-uipatch" antigravity`（或在 Shell 配置中导出该变量）；反之，在终端裸敲 `antigravity` 即可免卸载临时以原厂内置 UI 启动。
+
 ### 子命令与常用参数速查
 
 | 子命令（含别名） | 是否改写 `app.asar` | 功能说明 |
