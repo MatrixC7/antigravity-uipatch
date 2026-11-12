@@ -35,11 +35,18 @@
 
 `antigravity_uipatch.mjs` 采用完全解耦、随时可逆的三步设计：
 
-| 组件层级 | 目标路径 | 改动内容与体量 | 技术作用 |
-|---|---|---|---|
-| **① 宿主惰性钩子** | `/opt/Antigravity/resources/app.asar`<br>（仅改 `dist/languageServer.js`） | 新增 **5 行**（2 行注释 + 3 行条件代码；原厂其余 1,091 个文件条目及前序第三方注入条目的偏移与字节 0 变动） | 仅当环境变量 `AGY_UI_BUNDLE` 存在时向 `language_server` 追加 `--web_bundle_path`；未设置该变量时行为与原厂 100% 一致。 |
-| **② 外置前端补丁** | `~/.local/share/antigravity-uipatch/`<br>（仅改 `main.js` 四处汇聚点） | 提取 548 个归档条目（540 个文件 + 8 个目录，其余 539 个文件原样保留），对 `main.js`（`11,188,738` → `11,199,216` B）施加 **4 处唯一锚点补丁** | 1. **`fka()`（Mendel 原生基线 + 持久化预热）**：启动早期从 `~/.config/Antigravity/app_storage.json` 回填手动覆盖至新端口 `localStorage`；通过 `__agyResolveExperiments()` 区分“实时非空表 / 成功空表（清空旧缓存并启用 **41 项布尔开关 + 7 项参数配置 + `enable-developer-mode`** 基线） / 请求失败（保留 last-known-good）”；<br>2. **`lB().getMendelFlags`**：捕获次级通道 RPC 异常，与主通道共用同一套 `__agyResolveExperiments()` + `__agyNormalizeMendel()` 归一化策略；<br>3. **`jj` / `kj` / `FS` / `flagOverrideSync` / `mk()`**：使全部直读布尔通道实时响应双向覆盖，通过 `__agyRegisterNotifier()` 解耦 RPC 队列即时刷新界面，并将 `jetski.developer.*` 修改经串行合并队列（含删除墓碑）同步落盘至 `window.nativeStorage`（`app_storage.json`）；<br>4. **`mtb()`**：替换不可滚动的原生 `<datalist>` 为深色主题适配、向上展开（`bottom-full mb-1`）、支持滚轮与键盘导航及 ARIA `listbox` 语义的可滚动下拉框。 |
-| **③ 启动器开关** | `~/.local/share/applications/antigravity.desktop` | 基于统一解析器 `analyseDesktopExec()` 与双层编码（`Exec` argv → `GKeyFile` 字符串）注入 `AGY_UI_BUNDLE=<ui-dir>` 并刷新桌面缓存 | 从系统应用菜单启动时自动挂载修补后的外置 UI；执行 `disable` 移除该变量即可零成本切回原厂内置 UI。 |
+1. **宿主惰性钩子（`/opt/Antigravity/resources/app.asar` → `dist/languageServer.js`）**
+   采用尾部追加式无损重打包，仅在 `dist/languageServer.js` 末尾新增 **5 行**（2 行注释 + 3 行条件代码），原厂其余 `1,091` 个文件条目及前序第三方归档条目的偏移与字节均保持零变动。只有当进程环境中存在 `AGY_UI_BUNDLE` 时才向 `language_server` 追加 `--web_bundle_path`；未设置该变量时，启动行为与原厂构建 100% 一致。
+
+2. **外置前端补丁（`~/.local/share/antigravity-uipatch/` → `main.js` 四处汇聚点）**
+   从 `language_server` 内嵌归档只读提取全部 `548` 个条目（`540` 个文件 + `8` 个目录，其余 `539` 个文件原样保留），对核心包 `main.js`（`11,188,738` → `11,199,216` B）施加 **4 处唯一锚点补丁**并通过 V8 语法解析校验：
+   - **`fka()`（Mendel 原生基线 + 持久化预热）**：启动早期从 `~/.config/Antigravity/app_storage.json` 将手动覆盖预热回填至当前随机端口的 `localStorage`；通过共享策略 `__agyResolveExperiments()` 区分三种响应——服务端返回非空表时原样保留并开启 `enable-developer-mode`；服务端成功返回空表时清空旧缓存，启用实测 Google 原生基线（**41 项布尔开关 + 7 项参数配置**）与 `enable-developer-mode`；请求抛错时保留上一次成功的实时表（last-known-good）。
+   - **`lB().getMendelFlags`（次级通道统一归一化）**：捕获次级通道（`FS` / `GS`）的 RPC 异常，与主通道共用同一套 `__agyResolveExperiments()` + `__agyNormalizeMendel()` 解析与归一化逻辑。
+   - **`jj` / `kj` / `FS` / `flagOverrideSync` / `mk()`（全通道双向覆盖 + 磁盘落盘）**：使全部直读布尔通道实时响应本地双向覆盖，通过 `__agyRegisterNotifier()` 解耦后端 RPC 队列即时刷新界面，并将 `jetski.developer.*` 修改经串行合并队列（含删除墓碑）同步写入 `window.nativeStorage`（`app_storage.json`），跨重启与升级持久保留。
+   - **`mtb()`（可滚动开关选择器）**：将不可滚动、脱离深色主题的原生 `<datalist>` 替换为深色主题适配、向上展开（`bottom-full mb-1`）、支持鼠标滚轮与键盘导航及 ARIA `listbox` 语义的受控下拉框。
+
+3. **桌面启动器开关（`~/.local/share/applications/antigravity.desktop`）**
+   基于统一解析器 `analyseDesktopExec()` 与双层编码（`Exec` argv 层 → `GKeyFile` 字符串层），在保留既有 `env` 选项与其他环境变量的前提下注入 `AGY_UI_BUNDLE=<ui-dir>` 并刷新桌面缓存（`ksycoca6` / `update-desktop-database`）。从系统应用菜单启动时自动挂载外置 UI；执行 `disable` 移除该变量即可零成本切回原厂内置 UI。
 
 ### 为什么采用“Google 原生账号基线 + `Developer` 面板微调 + `app_storage.json` 持久化”设计
 
