@@ -1,0 +1,8 @@
+node_modules/
+ui/
+*.asar
+*.patched
+*.orig
+*.zip
+*.log
+run-*/

@@ -1,0 +1,39 @@
+# Pacman PostTransaction Hook 模板：antigravity-uipatch
+# 适用发行版：Arch Linux / EndeavourOS / CachyOS
+#
+# 安装至 /etc/pacman.d/hooks/ 前的重要安全与配置说明：
+#
+# 1. 绝对路径与目标账号（--user）：
+#    libalpm 直接解析本文件并通过 execv(3) 执行命令，不经过任何 shell，因此 `~` 与 `$HOME`
+#    均不会被展开。同时，Pacman Hook 以 root 权限运行（默认 HOME=/root），必须通过
+#    `--user <你的桌面用户名>` 显式指定目标账号，否则外置 Web UI 与备份无法写入你的用户目录。
+#
+# 2. Root 权限信任边界（切勿指向普通用户可写目录）：
+#    由于 Hook 以 root 身份执行，脚本本身及其所有上级父目录必须归属 `root:root` 且对普通用户不可写。
+#    请勿直接将 Exec 指向克隆在 `/home/<user>/...` 下的工作副本（否则构成标准本地提权面）。
+#    推荐先将脚本安装至系统只读路径后再生成 Hook：
+#      sudo install -D -o root -g root -m 0755 antigravity_uipatch.mjs \
+#        /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs
+#      sudo node /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs pacman-hook \
+#        --user <你的桌面用户名> \
+#        --script-path /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs \
+#        --write /etc/pacman.d/hooks/99-antigravity-uipatch.hook
+#
+# 3. 跨版本升级与多 Hook 协同顺序：
+#    - 本 Hook 采用 `Type = Path` 监听 `opt/Antigravity/resources/app.asar`，仅在软件包实际
+#      安装或覆盖该归档时触发。`sync` 子命令会自动以新版 `app.asar` 刷新单份配对备份、重注惰性
+#      环境变量钩子，并从新版 `language_server` 重新提取与修补 Web UI（杜绝旧版前端配新版后端）。
+#    - 按字典序，`99-antigravity-uipatch.hook` 位于 `99-antigravity-context-unlock.hook`
+#      之后执行；本工具采用尾部追加式 ASAR 重打包策略，完整保留前序 Hook 写入的其余全部条目
+#      （逐字节无损共存）。
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = opt/Antigravity/resources/app.asar
+
+[Action]
+Description = Synchronizing antigravity-uipatch (Web UI bundle & ASAR hook)...
+When = PostTransaction
+Exec = /usr/bin/node /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs sync --user YOUR_USERNAME
