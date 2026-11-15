@@ -1,321 +1,129 @@
 # antigravity-uipatch
 
-**解锁 Antigravity 桌面端应用在无 Google OAuth 会话（企业网关 / 自定义模型模式）及未命中云端灰度状态下被隐藏的实验门控前端界面（`Extensions` 扩展菜单、内置 `Terminal`、多标签右侧栏、原生 `File Explorer` 标签页以及 `Settings -> Developer` 实验开关控制面板），以洁净室（Clean-Room）原创组件补回并增强 `2.30+` 外部包被剥离的上下文容量与推理遥测指示器（`Context & Inference Indicator`），修复原生 `<datalist>` 选择器在 Chromium 下无法滚动的缺陷，并将手动开关微调跨随机端口与软件包升级持久保存至用户配置目录。**
-
-- **适用软件**：Antigravity 桌面端应用（Electron 宿主归档 `/opt/Antigravity/resources/app.asar` + 内嵌 Web UI 的本地引擎 `/opt/Antigravity/resources/bin/language_server`；本地上下文自动压缩预算解锁请参阅配套项目 [`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock) 与命令行版 [`agy-context-unlock`](https://github.com/MatrixC7/agy-context-unlock)）
-- **已验证版本与分支 / Tag 对应**：
-  - **`main` 主线**：`antigravity 2.31.0-1` Linux x86-64（`Built at CL: 1017595969`，Electron `44.9.1`），全部 **5 处前端补丁**采用**结构化唯一签名匹配**（动态解析 Closure Compiler 压缩标识符名，不再因常规符号重命名而中断升级同步，仅在函数真实结构变更时安全中止）
-  - **历史客户端版本 Tag**：若仍使用 `antigravity 2.29.x`（`CL 1015941558`），请检出对应标签 `git checkout v2.29`（[`v2.29`](https://github.com/MatrixC7/antigravity-uipatch/tree/v2.29)）
-- **各通道表现与解锁效果**：
-  - **企业网关 / 自定义模型通道**（`~/.gemini/config/config.json` 启用 `gateway.enabled: true`，无 Google OAuth 会话）：未修补时 `GetMendelFlags` 返回空表 `{}`，导致受实验开关控制的 `Extensions`、`New Terminal`、V2 多标签右侧栏、Git Diff 审查等 40 余项原生功能全部连带关闭；**应用本工具后，网关模式默认注入实测观测到的 Google 原生账号线上开启基线（41 项布尔开关 + 7 项参数配置），并默认开启 `Settings -> Developer` 面板与增强版 `Context & Inference Indicator`，支持在可视化界面中对任意开关做双向增减微调、一键重置与跨重装持久化**
-  - **Google OAuth 原生通道**：原样保留云端实时下发的完整 Mendel 实验表（实测快照共 384 项），**仅额外确保 `enable-developer-mode` 与 `enable-context-usage-indicator` 开启**，允许突破账号灰度限制在 `Settings -> Developer` 面板中自由开启或关闭任意实验特性，并通过 `clientStorageFeature` / `window.nativeStorage` 实时落盘至 `~/.config/Antigravity/app_storage.json`
-- **运行依赖**：仅需 Node.js `>= 18` 标准库（已在 `Node.js v26.13.1` 实测验证；零第三方 npm 依赖，无需外部 `unzip` 或 `@electron/asar` CLI）
-- **许可证**：[MIT License](LICENSE)
-
-> [!TIP]
-> **洁净室原创恢复与增强：`2.30+` 上下文容量与双层推理遥测指示器（`Context & Inference Indicator`）**
-> 在 `antigravity 2.30+ / 2.31` 外部发行包（`appType: "external"`）中，Google 将入口插槽 `buildBindings.contextUsageIndicator` 置为了 `void 0` 并剔除了原版组件代码。本工具在不拷贝任何 `2.29` 闭源字节的前提下，向该预留插槽挂载了 **100% 原创实现的增强指示器 `__AgyContextIndicator`**（同时自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 开关）：除展示总上下文占用圆环、压缩后近似标记（`~`）及可折叠的 `Instructions & tools` 细分项（`System` / `Tools` / `MCP` / `Rules & Skills`）外，还通过轻量统计增量通道在每轮完成后原子刷新 **`Last Turn`（最近完成轮次）** 与 **`Σ Session · N turns`（全会话累积 `Σ` / 均值 `Avg`）** 两组左入右出 `4×2` 正交遥测矩阵——左列输入侧展示 **`Input` / `Cache hit` / `In speed` / `TTFT`**，右列输出侧展示 **`Output` / `Response` / `Out speed`（支持通过 `t/s [Off | Turn | Avg]` 三段开关按需将单轮或全会话均值常驻底栏） / `Duration`**，并汇总当轮与全会话的异常报错/静默重试角标（`! error` / `↻ retry`）。各项读数含义与实机现象解惑详见 [《原理与使用指南》第 2 节](docs/overview-and-guide.md#2-上下文容量与推理遥测面板context--inference-indicator读数指南与设计解惑)。
+面向 **Antigravity 桌面端（Linux）** 的零依赖前端解锁与增强工具：补齐企业网关模式下被隐藏的原生工作台界面，开放 `Settings -> Developer` 实验开关面板并支持持久化保存，同时在输入框右下角新增**上下文用量与输出速率指示器**。
 
 ---
 
-## 1. 背景与问题定义
+## 核心功能
 
-在 Antigravity 桌面端中切换至企业网关模式（或使用未被云端实验灰度的 Google 账号）时，右上角 `+` 菜单仅剩 `Open File` 一项，`Extensions`（UI 插件子菜单）与 `New Terminal`（内置终端）入口完全消失，右侧边栏亦无法自由切换多标签栏或原生树状文件浏览器（`File Explorer`）。
-
-通过对桌面端 Electron 宿主包 `app.asar`、Go 编排引擎 `language_server` 与本地 Connect RPC 接口的联合取证，可以确认以下四项核心事实：
-
-1. **后端扩展与终端能力本身处于正常就绪状态，隐藏行为纯粹发生在前端渲染门控层。**
-   实测企业网关模式下，`GetServerConfiguration` 正常返回 `"sidecars": { "enabled": true }`，`GetAllPlugins` 正常加载并拉起本地 Sidecar 进程；问题根源在于 `GetMendelFlags` 在无 Google OAuth 凭据时返回空对象 `{"experimentConfig":{}}`，使前端所有缺省关闭的实验门控全部回退为隐藏。
-2. **本地 RPC 与环境变量均无法绕过服务端的实验开关权限门禁。**
-   `language_server` 虽包含 `SetMendelFlagOverrides` RPC，但在公开构建中受内部只读标志 `dev_mode` 硬性拦截，直接调用返回 `permission_denied: Mendel flag overrides require developer mode`；其余实验接口（`SetBaseExperiments`、`UpdateDevExperiments`、`UpdateEnterpriseExperimentsFromUrl`）虽返回 `{}`，但在空 Mendel 表下均不生效（完整实测记录见 [《Mendel 门控取证报告》](docs/mechanism-mendel-gating.md)）。
-3. **直读 Mendel 实验通道在非 `dev_mode` 下与本地覆盖存储断路。**
-   Electron 宿主以 `--https_server_port 0` 在随机回环端口提供前端服务。`2.31` 起上游虽引入 `clientStorageFeature`（底层读写 `~/.config/Antigravity/app_storage.json`）持久化 `FeatureManagerV2` 的 `customFlag` 覆盖，但 `Extensions` 子菜单（`enable-ui-sidecars`）、浏览器子代理（`enable-browser-subagent-v2`）等 20 余项直读/次级 Mendel 开关仍依赖被服务端拒绝的 `SetMendelFlagOverrides` RPC，导致面板拨动对这些通道不生效。
-4. **原版 `Developer` 面板的开关添加框存在 Chromium 原生 `<datalist>` 不可滚动缺陷。**
-   即便解锁 `Settings -> Developer` 页面，原版前端底部用于搜索和添加开关的组件（`EGb()`）采用了 HTML `<datalist>`。在 Linux Electron / Chromium 中，该原生弹窗不仅强制渲染为脱离深色主题的白底黑字，且**完全不支持滚轮滚动**，导致首屏之外的数十个实验开关无法浏览点选。
-
----
-
-## 2. 解决方案：惰性 ASAR 钩子 + Google 原生基线对齐 + 全通道覆盖桥接
-
-`language_server` 原生提供命令行参数 `-web_bundle_path`，支持从外部目录优先加载前端静态资源（覆盖编译进 Go 二进制内的 `agy_hub_web_bundle` ZIP 归档），且**无需修改 `language_server` 二进制的任何一个字节**。
-
-`antigravity_uipatch.mjs` 采用完全解耦、随时可逆的三步设计：
-
-1. **宿主惰性钩子（`/opt/Antigravity/resources/app.asar` → `dist/languageServer.js`）**
-   采用尾部追加式无损重打包，仅在 `dist/languageServer.js` 末尾新增 **5 行**（2 行注释 + 3 行条件代码），原厂其余 `1,111` 个文件条目及前序第三方归档条目的偏移与字节均保持零变动。只有当进程环境中存在 `AGY_UI_BUNDLE` 时才向 `language_server` 追加 `--web_bundle_path`；未设置该变量时，启动行为与原厂构建 100% 一致。
-
-2. **外置前端补丁（`~/.local/share/antigravity-uipatch/` → `main.js` 五处结构化汇聚点）**
-   从 `language_server` 内嵌归档只读提取全部 `548` 个条目（`540` 个文件 + `8` 个目录，其余 `539` 个文件原样保留），按唯一语法结构动态解析 Closure Compiler 压缩符号名，对核心包 `main.js`（`11,871,831` → `11,917,108` B）施加 **5 处唯一锚点补丁**并通过 V8 语法解析校验：
-   - **主 Mendel 拉取入口（`Ola()`：原生基线 + 启动预热）**：启动早期从 `~/.config/Antigravity/app_storage.json` 预热手动覆盖表；通过共享策略 `__agyResolveExperiments()` 区分三种响应——服务端返回非空表时原样保留并开启 `FLAGS`（`enable-developer-mode` 与 `enable-context-usage-indicator`）；服务端成功返回空表时清空旧缓存，启用实测 Google 原生基线（**41 项布尔开关 + 7 项参数配置**）与 `FLAGS`；请求抛错时保留上一次成功的实时表（last-known-good）。
-   - **次级 Mendel 包装器（`Qt().getMendelFlags`：双通道统一归一化）**：捕获次级通道（`IT` / `JT`）的 RPC 异常，与主通道共用同一套 `__agyResolveExperiments()` + `__agyNormalizeMendel()` 解析与归一化逻辑。
-   - **全通道本地覆盖桥接（`Hi` / `Ii` / `IT` / `flagOverrideSync` / `hhd()`）**：绑定 `clientStorageFeature`（`storageService` → `app_storage.json`）与 `flagOverrideSync`，使全部直读与次级布尔通道实时响应双向覆盖，首次启动未配置外观开关时默认初始化 `contextUsageIndicatorEnabled = "true"`（用户手动关闭为 `"false"` 后永久尊重用户选择），并在 `provider.dispose()` 时自动注销监听器。
-   - **可滚动开关选择器（`EGb()`）**：自动提取宿主压缩后的 React 与按钮组件符号，将不可滚动、脱离深色主题的原生 `<datalist>` 替换为深色主题适配、向上展开（`bottom-full mb-1`）、支持鼠标滚轮与键盘导航及 ARIA `listbox` 语义的受控下拉框。
-   - **增强型上下文容量与推理遥测指示器（`buildBindings.contextUsageIndicator` → `__AgyContextIndicator`）**：向 `2.30+` 外部包预留的 `contextUsageIndicator` 插槽挂载原创 Portal 浮层组件（支持 `--indicator-mode=custom|polyfill|stock`，默认 `custom`；底栏按钮与官方 `h-7` 胶囊 1:1 视觉对齐），在保持聊天正文最近 50 步懒加载不变的前提下按偏移增量拉取百字节级生成统计，完整展示上下文窗口 `TokenType` 细分占比，以及 `Last Turn` 与 `Σ Session · N turns`（`Σ` / `Avg`）两组 `4×2` 推理指标（`Input` / `Output`、`Cache hit` / `Response`、`In speed` / `Out speed` 与 `t/s [Off | Turn | Avg]` 底栏常驻切换、`TTFT` / `Duration`）及当轮与全会话报错/重试角标。
-
-3. **桌面启动器开关（`~/.local/share/applications/antigravity.desktop`）**
-   基于统一解析器 `analyseDesktopExec()` 与双层编码（`Exec` argv 层 → `GKeyFile` 字符串层），在保留既有 `env` 选项与其他环境变量的前提下注入 `AGY_UI_BUNDLE=<ui-dir>` 并刷新桌面缓存（`ksycoca6` / `update-desktop-database`）。从系统应用菜单启动时自动挂载外置 UI；执行 `disable` 移除该变量即可零成本切回原厂内置 UI。
-
-### 为什么采用“Google 原生账号基线 + `Developer` 面板微调 + `app_storage.json` 持久化”设计
-
-开箱状态下（`0 overrides`），企业网关模式与 Google 原生账号拥有**一致的默认前端功能集**（内置终端 `Terminal`、多标签右侧栏、侧边栏 `Extensions`、Git Diff 审查、PDF / Notebook 预览、分屏、全文搜索、快捷键自定义等全部直接就绪），同时避免误开依赖 Google 内部专有基建或裁剪皮肤的危险开关。在此一致基线之上，你可以随时打开 `Settings -> Developer -> Custom Flags`：
-- **关闭不喜欢的默认项**（如关掉隐藏独立历史列表的 `remove-conversation-history`，或关掉 `enable-aux-pane-redesign` 切回经典常驻四图标栏）—— 面板会清晰标记 `forced off`；
-- **开启原生账号尚未灰度的进阶项**（如添加 `enable-bottom-terminal-panel`、`enable-file-explorer-tab`、`enable-conversation-forking`、`markdown-table-v2` 等）—— 面板会标记 `forced on`；
-- **跨重启与重装自动保留，亦可一键重置** —— 修改实时保存在 `~/.config/Antigravity/app_storage.json`，Pacman 重装或升级软件包均不会冲掉；点击右上角 `Reset overrides` 即可随时清空微调，回到纯净的 Google 原生默认状态 + `enable-developer-mode`。
+- **补齐企业网关模式缺失界面**：未登录 Google OAuth（启用 `gateway.enabled: true`）时自动注入 Google 原生账号默认功能集，直接恢复右上角 `Extensions`、内置 `Terminal`、多标签右侧栏、Git Diff 审查、PDF / Notebook 预览等 40 余项被空实验表隐藏的原生界面。
+- **开放 `Settings -> Developer` 并跨升级持久化**：任意登录模式下均可打开实验特性控制面板，修复原版候选框在 Chromium 下白底且无法滚动的问题；所有开关微调实时生效并保存在 `~/.config/Antigravity/app_storage.json`，重启与升级软件包均不丢失。
+- **新增上下文用量与输出速率指示器**：在输入框右下角添加圆环百分比按钮，点击即可查看上下文构成明细，以及最近一轮（`Last Turn`）与整场对话（`Σ Session`）的输入/输出 Token 用量、缓存命中率、吞吐速率、首字延迟与耗时统计（右上角支持通过 `t/s [Off | Turn | Avg]` 切换底栏速率显示）：
+  ```text
+  Context Window             t/s [Off | Turn | Avg]   63.6%
+  ▓▓▓▓████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  500.0K / 786.4K tokens used
+  ─────────────────────────────────────────────────────────
+  ● Instructions & tools ▾                      20.0K · 2.5%
+    │ System            13.5K   Tools                  6.5K
+  ● Conversation                              480.0K · 61.0%
+  ○ Available                                 286.5K · 36.4%
+  ─────────────────────────────────────────────────────────
+  Last Turn                                      [↻ 1 retry]
+  Input             644.1K   Output                     379
+  Cache hit          99.0%   Response                   230
+  In speed      402.5K t/s   Out speed            144.5 t/s
+  TTFT               1.60s   Duration                 4.22s
+  ─────────────────────────────────────────────────────────
+  Σ Session · 24 turns                [! 1 error] [↻ 3 retries]
+  Σ Input           12.45M   Σ Output                 42.8K
+  Σ Cache hit        95.8%   Σ Response               14.7K
+  Avg In speed  368.0K t/s   Avg Out speed        139.2 t/s
+  Avg TTFT           1.74s   Avg Duration             4.08s
+  ```
+- **零外部依赖、不改动引擎二进制**：仅需 Node.js `>= 18` 标准库；**完全不修改 `language_server` 二进制**（可与 [`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock) 无冲突共存），仅在 `app.asar` 注入 5 行环境变量判断逻辑来按需加载外置 UI，不传环境变量即按原厂默认界面启动。
 
 ---
 
-## 3. 安装与使用指南
+## 版本要求与兼容性
 
-### 前置条件
+- **当前 `main` 分支支持版本**：`antigravity 2.31.x`（Linux x86-64）
+- **版本对应说明**：不同版本的 Antigravity 前端代码结构存在差异，补丁脚本**不能跨版本通用**。请确认客户端版本，若使用其他版本请在仓库 Tags 中切换至对应版本的脚本。
+- **运行环境**：Node.js `>= 18`（仅使用内置标准库，无第三方依赖）
 
-1. 确认系统已安装 Node.js `>= 18`（运行 `node -v` 检查）。
-2. 若 `/opt/Antigravity/resources/app.asar` 属主为 `root:root`，请在写入宿主归档的命令（`install`、`sync`、`restore`）前加上 `sudo` 并显式传入 `--user "$USER"`；若 `resources/` 目录已归属当前桌面用户，无需 `sudo` 即可直接运行。
+---
 
-### 标准操作流程
+## 快速开始
 
 ```bash
 git clone https://github.com/MatrixC7/antigravity-uipatch.git ~/antigravity-uipatch
 cd ~/antigravity-uipatch
 
-# 1. 纯只读自检：校验 ASAR 零改动字节往返、内嵌 ZIP main.js CRC32、五处补丁唯一锚点与 V8 语法解析
+# 1. 只读自检（校验本机归档完整性、补丁锚点与语法解析，不修改任何文件）
 node antigravity_uipatch.mjs self-test
 
-# 2. 安装补丁（若 app.asar 归属 root，使用：sudo node antigravity_uipatch.mjs install --user "$USER"）
-node antigravity_uipatch.mjs install
+# 2. 安装补丁（若 /opt/Antigravity 归属当前用户可去掉 sudo 与 --user "$USER"）
+sudo node antigravity_uipatch.mjs install --user "$USER"
 
-# 3. 校验安装状态、构建版本对齐与备份配对关系（确认输出 PATCHED、pairs : yes、align : matches）
+# 3. 验证安装状态（确认输出 PATCHED、pairs: yes、align: matches）
 node antigravity_uipatch.mjs verify
 ```
 
-完成后，**从桌面环境的应用菜单重启 Antigravity**（若仅通过 `repair` 更新了外置 UI 补丁而宿主钩子与启动器早已生效，在窗口内按 `Ctrl+R` 重载即可）：
-- 开箱即享与 Google 原生账号一致的全部默认功能（右上角 `+` 菜单已包含 `New Terminal`、`Browser`、`Extensions` 等）；
-- 如需进一步增减实验开关，进入 **`Settings -> Developer -> Custom Flags`** 即可直接拨动已有开关或通过底部向上展开的选择器添加新开关（完整开关状态与推荐配置见 [《实验特性开关全景目录》](docs/custom-flags-catalog.md)）。
-
-> [!NOTE]
-> **启动方式说明（桌面菜单 vs. 终端命令行）**：`install` 已自动将 `env AGY_UI_BUNDLE=<ui-dir>` 写入 `~/.local/share/applications/antigravity.desktop` 的 `Exec=` 行并刷新桌面缓存，因此**从系统应用菜单 / 图标点击启动时无需手动指定环境变量**。若你习惯在终端直接运行命令启动（不经过 `.desktop` 文件），由于 `app.asar` 钩子仅在检测到该变量时才挂载外置 UI，请执行 `AGY_UI_BUNDLE="$HOME/.local/share/antigravity-uipatch" antigravity`（或在 Shell 配置中导出该变量）；反之，在终端裸敲 `antigravity` 即可免卸载临时以原厂内置 UI 启动。
-
-### 子命令与常用参数速查
-
-| 子命令（含别名） | 是否改写 `app.asar` | 功能说明 |
-|---|:---:|---|
-| `self-test` | 否（纯只读） | 内存校验 ASAR 空替换逐字节往返、内嵌 Web UI `main.js` CRC32、5 处锚点唯一性与 V8 语法 |
-| `install`（`patch`） | 是 | 记录/校验配对备份，暂存提取并修补外置 UI，注入 `app.asar` 惰性钩子，开启 `.desktop` 开关 |
-| `sync` | 是 | 面向软件包升级后的全量同步：当新版 `app.asar` 未挂钩时自动刷新配对备份并重提新版 UI |
-| `repair` | 否 | 仅从当前 `language_server` 重新提取并原子替换外置 Web UI（自动优先沿用 `.desktop` 当前指向的目录） |
-| `verify`（`status`） | 否（纯只读） | 结构化检查构建 `CL`、备份配对、启动器四态（`ON`/`OFF`/`UNKNOWN`/`INVALID`）、`uipatch.json` 与 `main.js` 哈希及运行中进程 |
-| `disable` | 否 | 仅从 `.desktop` 移除 `AGY_UI_BUNDLE` 并刷新桌面缓存，重启即回退原厂内置 UI |
-| `restore`（`uninstall`） | 是 | 经 `pairsWith` 内容级配对校验后原子写回原版 `app.asar`，并关闭 `.desktop` 启动器开关 |
-| `extract [dir]` | 否 | 将未打补丁的原厂内嵌 Web UI 解压至指定的新建或空目录（拒绝非空目录，绝不清空用户数据） |
-| `pacman-hook` | 否 | 打印或经 Root 权限链审计后写入（`--write <file>`）Pacman `PostTransaction` Hook |
-
-常用全局选项：`--user <username>`（以 `root` 运行时指定目标桌面账号，亦可通过环境变量 `AGY_TARGET_USER` 传入）、`--install-dir <dir>`（默认 `/opt/Antigravity`）、`--ui-dir <dir>`（自定义外置 UI 目录；未指定时按 `--ui-dir` > `AGY_UI_DIR` > `.desktop` 已配置路径 > `~/.local/share/antigravity-uipatch` 顺序解析）、`--indicator-mode <custom|polyfill|stock>`（上下文指示器挂载策略，默认 `custom` 启用增强版；若未来上游同时恢复原生组件并重构内部 Hook 则自动安全回退保留原生实现）、`--dry-run`（全局零写入预演）、`--force`（仅 `restore` 强制忽略配对失配）、`--quiet`（仅 `sync` 静默标准输出）。
-
-### 软件包升级后的处理方式与 Pacman 自动更新 Hook
-
-每次系统升级 `antigravity` 软件包时，`/opt/Antigravity/resources/app.asar`（宿主钩子被覆盖）与 `language_server`（内嵌新版前端代码）都会更新。**切勿长期使用旧版外置 UI 搭配新版 `language_server` 后端**，请按以下任一方式同步：
-
-1. **手动同步（一行命令同时刷新配对备份、重注钩子并重提新版 UI，保留你在 `app_storage.json` 中的手动开关配置）**：
-   ```bash
-   sudo node ~/antigravity-uipatch/antigravity_uipatch.mjs sync --user "$USER"
-   ```
-2. **Pacman 自动更新 Hook（推荐，适用于 Arch Linux / EndeavourOS / CachyOS）**：
-   - Pacman Hook 以 `root` 身份直接经 `execv(3)` 执行（不经过 shell，不展开 `~`）。**切勿在 Hook 中直接指向普通用户主目录下的可写脚本**，应先将单文件自包含脚本安装至 `root:root` 拥有的系统只读目录，再由 `pacman-hook` 子命令经权限链审计后写入：
-   ```bash
-   # 1. 将自包含脚本安装至 root:root 拥有的系统只读路径
-   sudo install -D -o root -g root -m 0755 \
-     ~/antigravity-uipatch/antigravity_uipatch.mjs \
-     /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs
-
-   # 2. 审计路径权限链并生成 /etc/pacman.d/hooks/99-antigravity-uipatch.hook
-   sudo node /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs pacman-hook \
-     --user "$USER" \
-     --script-path /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs \
-     --write /etc/pacman.d/hooks/99-antigravity-uipatch.hook
-   ```
-   - 模板文件亦提供于 [`pacman/99-antigravity-uipatch.hook`](pacman/99-antigravity-uipatch.hook)（默认不带 `--quiet`，以便在 `pacman -Syu` 事务日志中直接查看同步状态与错误诊断）。该 Hook 采用 `Type = Path` 监听 `opt/Antigravity/resources/app.asar`，按字典序自动排在 `99-antigravity-context-unlock.hook` 之后运行，并通过尾部追加式 ASAR 重打包完整保留前序 Hook 的所有改动。
+> [!IMPORTANT]
+> **`install` 不会自动修改你的桌面启动器文件**。安装完成后，启动 Antigravity 时需手动传入环境变量 `AGY_UI_BUNDLE` 才会加载外置修补 UI（不传该变量则直接运行原厂内置 UI）：
+> - **终端启动**：
+>   ```bash
+>   AGY_UI_BUNDLE="$HOME/.local/share/antigravity-uipatch" antigravity
+>   ```
+> - **桌面图标（`.desktop` 文件）启动**：直接编辑 `~/.local/share/applications/antigravity.desktop` 中的 `Exec=` 行（若该文件不存在，可先启动一次 Antigravity 使其自动创建，或在系统应用菜单右键「编辑应用程序」生成；若仍未生成，再从 `/usr/share/applications/antigravity.desktop` 复制过来并注意赋予当前用户读写权限）。注意 `.desktop` 中不展开 `$HOME`，请填写实际绝对路径：
+>   ```ini
+>   Exec=env AGY_UI_BUNDLE=/home/<你的用户名>/.local/share/antigravity-uipatch /usr/bin/antigravity %U
+>   ```
 
 ---
 
-## 4. 适用场景与各模式表现对比
+## 日常升级与卸载还原
 
-| 接入模式 / 场景 | 未修补时的前端表现 | 应用 `antigravity-uipatch` 后的表现 | 与配套工具的关系 |
-|---|---|---|---|
-| **桌面端：企业网关通道**<br>（`gateway.enabled: true`） | `GetMendelFlags` 为 `{}`；`Extensions`、`New Terminal`、多标签右侧栏、Git Diff 等 40 余项功能与 `Developer` 页全部隐藏 | **默认注入 Google 原生账号线上开启基线（41 项布尔 + 7 项载荷）+ 开启 `Settings -> Developer`**；手动增减自动持久化至 `app_storage.json` | 网关模式下上下文预算默认已达 `872K`，无需二进制补丁 |
-| **桌面端：Google OAuth 原生通道** | 有 `Extensions` 与 `Terminal`，但 `Developer` 页及未灰度特性（如 `fileExplorerTab`、`bottomTerminalPanel`）隐藏；直读实验开关无法在本地覆盖 | **保留云端实时下发实验表 + 开启 `Settings -> Developer`**，支持全通道双向覆盖任意实验项并跨重启/重装持久保留 | 可与 [`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock)（解锁原生通道 `983K` 上下文预算）**零冲突同时安装** |
-
----
-
-## 5. 验证与诊断工具
-
-### 1. 静态状态、版本对齐与配对备份校验（纯离线只读）
+系统每次升级 `antigravity` 软件包后，请同步更新外置 UI，避免旧版前端搭配新版后端：
 
 ```bash
-# 只读自检（ASAR 零改动往返哈希、内嵌 ZIP main.js CRC32、五处锚点唯一性、V8 语法解析）
-node antigravity_uipatch.mjs self-test
-
-# 查看当前安装状态、启动器四态（ON/OFF/UNKNOWN/INVALID）、构建 CL 对齐、备份配对及运行中进程状态
-node antigravity_uipatch.mjs verify
+# 软件包升级后一键同步（保留你在 app_storage.json 中的全部开关与指示器偏好）
+sudo node ~/antigravity-uipatch/antigravity_uipatch.mjs sync --user "$USER"
 ```
 
-### 2. 内嵌实验开关全景静态扫描（`tools/inspect_flags.mjs`）
+<details>
+<summary><b>可选：配置 Arch Linux / Pacman 升级自动同步 Hook</b></summary>
 
-无需解压落盘，直接从 `language_server` 内存提取 `main.js`、自动解析当前构建压缩后的读取器符号，列出全部 **107 个 `customFlag` 门控关系**与 **27 处直读 / 次级 Mendel 调用点（去重后为 24 组 `reader+key` 组合，覆盖 23 个唯一实验键）**（耗时约 `0.1s`）：
+将单文件脚本安装至 `root:root` 只读目录并生成 `PostTransaction` Hook，此后 `pacman -Syu` 升级 `antigravity` 时将自动完成同步：
 
 ```bash
-# 查看全部实验开关及受控特性映射
-node tools/inspect_flags.mjs
+sudo install -D -o root -g root -m 0755 \
+  ~/antigravity-uipatch/antigravity_uipatch.mjs \
+  /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs
 
-# 按关键字过滤或输出机器可读 JSON
-node tools/inspect_flags.mjs --filter terminal
-node tools/inspect_flags.mjs --json
+sudo node /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs pacman-hook \
+  --user "$USER" \
+  --script-path /usr/local/share/antigravity-uipatch/antigravity_uipatch.mjs \
+  --write /etc/pacman.d/hooks/99-antigravity-uipatch.hook
 ```
-
-### 3. 独立引擎回环在线验证（`verify_live.mjs`）
-
-不启动 Electron GUI、不触碰 `~/.gemini` 用户目录，在随机回环端口拉起临时 `--standalone` 引擎实例，通过 HTTPS 实测校验 `GET /`、`GET /main.js`（磁盘 SHA256 一致性与 V8 语法解析）、**10 项静态包内补丁断言（static bundle assertions）**以及 `GetServerConfiguration` Connect RPC（合计 11 项 `[OK]` 检查输出）：
+</details>
 
 ```bash
-node verify_live.mjs
-```
-
-### 4. 离线单元测试套件
-
-包含 **44 项自动化测试**（`43` 项核心单元与回归测试 + `1` 项扫描工具测试：涵盖合成与真实 `app.asar` 逐字节往返一致性、单条目替换隔离性、ASAR `link` 节点容错、备份配对判定与坏备份拒绝、STORE/DEFLATE ZIP 解压与单比特 CRC32 损坏拦截、EOCD 诱饵与中央目录边界校验、路径穿越与规范化名冲突拦截、双 ZIP 时区归档排除、全部 5 处结构化前端补丁与 V8 语法校验、Closure 压缩符号含 `$` 前缀重命名自适应测试、结构扫描器 fail-closed 断言、VM 沙盒验证 Google 原生基线与双向覆盖语义、主/次双通道共享成功空表清缓存与错误保留 last-known-good、`clientStorageFeature` + `nativeStorage` 跨随机端口持久化与 hydrate 失败重试、上下文指示器 `TokenType` 细分 / 压缩后近似 / `Last Turn` 与 `Σ Session · N turns` 双 `4×2` 正交指标 / 真实缓存总输入分母 / `PROD_UI` 步骤 `createdAt` 时间戳回退 / 流式期间快照稳定 / 原生 `h-7` 胶囊尺寸与 `t/s [Off | Turn | Avg]` 三段式底栏切换持久化及三模式自适应策略、解耦 RPC 队列的本地即时通知与 `dispose` 注销、UI 提交状态机双失败保护、`resolveWriteRoot` 与符号链接隔离策略，以及 `.desktop` 双层编码幂等重写、`env` 选项顺序、程序后诱饵参数保留与启动器四态解析）：
-
-```bash
-node --test tests/
-```
-
----
-
-## 6. 仓库文档导航
-
-本仓库按“通俗概念导读 → 补丁工程实现 → 门控逆向取证 → 全量开关目录”提供完整中文文档体系：
-
-### 通俗导读与补丁实现原理
-- **[《原理与使用指南（通俗导读）》（`docs/overview-and-guide.md`）](docs/overview-and-guide.md)**
-  面向所有读者：解释 Antigravity 三层架构、企业网关与原生账号各自隐藏按钮的原因、`Context & Inference Indicator` 双层 `4×2` 面板读数指南与常见实机现象解惑（快照刷新、Prefix KV 缓存分母、`TTFT` 与上下文长度关系、工具调用整包突发 `Out speed`、双列表懒加载内存机制）、以及 KDE `ksycoca6` 缓存等日常注意事项。
-- **[《补丁架构与脚本实现详解》（`docs/patch-internals.md`）](docs/patch-internals.md)**
-  面向开发者与系统管理员：深入解析尾部追加式无损 ASAR 打包器、双内嵌 ZIP 识别与 CRC32 校验器、`main.js` 五处结构化汇聚点补丁（动态符号捕获、`clientStorageFeature` 桥接与 `language_server` 遥测裁剪逆向取证）、统一桌面启动器解析器 `analyseDesktopExec()`、原子切换状态机以及 Pacman Hook 的 Root 信任边界审计。
-
-### 深度技术报告与参考手册
-- **[《技术报告：Mendel 实验开关门控机制与本地注入路径实测取证》（`docs/mechanism-mendel-gating.md`）](docs/mechanism-mendel-gating.md)**
-  完整记录前端三轨门控调用链、Google OAuth 线上 384 项快照对比、`clientStorageFeature` 与直读通道断路根因、8 条候选技术路径的实测返回结果，以及 Electron 主程序 9 项 Fuse 位的二进制实测表。
-- **[《技术参考：Antigravity 桌面端实验特性开关全景目录》（`docs/custom-flags-catalog.md`）](docs/custom-flags-catalog.md)**
-  包含全部 **23 个直读 / 次级实验键（27 处字面量调用点 / 24 组组合）** 与 **107 项 `FeatureManagerV2` `customFlag`** 的实测基线状态及逐项微调建议。
-
----
-
-## 7. 安全机制、已知边界与一键回滚
-
-### 安全防护设计
-- **零改动 `language_server` 二进制**：绝不修改 Go 二进制文件，彻底避免破坏 ELF 签名或干扰 `antigravity-context-unlock` 的备份配对。
-- **不分发完整第三方编译产物**：仓库体积仅百余 KB，不包含完整的 Antigravity Web UI 编译包或其提取资源；所有前端文件均在用户本机安装时从本机 `language_server` 实时提取。为完成定点修补，源码中含有少量用于唯一匹配的原厂代码锚点字符串，以及 Google 原生的第三方工具免责声明文案（`third-party-tools-disclaimer-text` 的默认载荷，用于在网关模式下复刻原生基线）。它们仅作为兼容性定位与基线数据存在，不构成可用软件的再分发。
-- **故障闭合（Fail-Closed）与先预备后提交顺序**：任何锚点出现次数不为 `1`、ZIP 条目 CRC32 不符或修改后未通过 V8 `vm.Script` 语法解析时，脚本在暂存阶段即安全中止（退出码 `3`）；`install` / `sync` 均先在暂存目录完成新前端包的完整构建与校验（`preparePatchedUi`），确认无误后才改写 `app.asar` 并原子切换目录（`commitPatchedUi`），绝不留下半成品或白屏包。
-- **`--dry-run` 全局零写入与按命令前置预检**：所有子命令在 `--dry-run` 模式下**绝不新增、修改或删除任何文件与目录**，并按各自职责执行只读预检（`install`/`sync` 执行完整 `self-test` 及备份可用性/缺失检查；`repair` 在内存中跑完提取、5 处补丁与 V8 语法验证；`restore`/`disable`/`extract`/`pacman-hook` 分别校验配对、启动器、空目录及 Root 路径权限链），使可只读判定的失败场景在预演中以相同退出码提前暴露。
-- **UI 切换的提交状态机**：显式区分 `prepared` → `old-moved` → `committed` / `rolled-back` / `rollback-failed`，只有当新包确认落位或回滚确认成功后才删除旧副本；若替换与回滚同时失败，旧目录会被保留并在错误信息中给出绝对恢复路径与 `mv` 命令，绝不出现“唯一可用副本被清空”的情况。
-- **不删除用户数据**：`extract` 只允许写入**新建或空目录**，对非空目录直接拒绝（绝不递归清空），并显式拒绝 `/`、`$HOME`、安装根目录及其父目录等危险目标。
-- **区分“授权根”与“根以下的链接”**：普通文件与目录写入前先把目标根**一次**规范化到 `realpath`（因此用户自己的 `$HOME`、`--ui-dir` 或 `/tmp` 是符号链接也能正常工作），此后根以下出现任何符号链接立即中止；Pacman Hook 的 Root 脚本审计则更严格——词法链上出现任何符号链接即拒绝，并在 `realpath` 解析后的**物理**祖先链上逐级复核 `root:root` 归属与非组/他写权限。
-- **内容级配对还原与坏备份隔离重建**：`restore` 在写回备份前验证“对备份重施钩子能否逐字节复现当前 `app.asar`”，防止跨版本误还原导致客户端降级。当已安装归档处于已挂钩（hooked）状态时，备份缺失、损坏或失配均会导致 `install` / `sync` 报错退出（退出码 `3`）；若已安装归档确认为未挂钩的原版（例如刚完成重装）而旧备份损坏，脚本会将坏备份隔离改名为 `app.asar.orig.unusable-<timestamp>`（保留证据）后直接重建新备份，无需重复重装。
-
-### 已知边界说明
-1. **前端入口解锁不替代云端专有服务或其余已被编译期剥离的专有组件**：开启前端实验开关仅解除本地界面门控；部分标记为 Google 内部专用的开关（如 CitC、ABFS、Critique、Google Drive 上传等）因缺少云端后端权限无法工作；而 `2.31.0-1` 外部包中被置为 `buildBindings: void 0` 的三项组件里，**`contextUsageIndicator` 已由本工具通过洁净室原创组件完整补回并增强**，其余两项（`enable-code-search-palette` 与 `enable-enhanced-file-viewer`）因无实现代码仍不会生效（详见 [《全景目录》第 1.2 节](docs/custom-flags-catalog.md#12-推荐按需增减的微调清单)与[第 3.4 节](docs/custom-flags-catalog.md#34-历史列表策略内部专有基建远程通道与裁剪皮肤39-项)）。
-2. **请勿在启用状态下直接删除外置 UI 目录**：当 `.desktop` 仍带有 `AGY_UI_BUNDLE` 时，若手动删空 `~/.local/share/antigravity-uipatch`，`language_server` 会因目录缺失返回 `HTTP 500`。清理目录前请务必先运行 `disable` 或 `restore`。
-3. **多 Hook 的执行顺序与还原边界**：本工具采用尾部追加式重打包，因此与其他修改 `app.asar` 的 Hook **在其之后运行**时可无损共存（前序改动全部保留）。但若在本工具之后又有第三方工具改写了别的条目，`restore` 的字节级配对会判定失配并**拒绝还原**（保护行为）——此时请重装 `antigravity` 后再 `install`。
-4. **`verify` 的四态启动器契约与实时进程提示**：`verify` 将启动器严格区分为 `ON`、`OFF`、`UNKNOWN`、`INVALID` 四种状态。当全部资产健康且启动器为有效 `ON`，或启动器被主动停用为明确的 `OFF`（如执行 `disable` 后使用原厂内置 UI，此时不再强制要求已停用的默认外置目录存在）且其余受检项无损坏时，均返回退出码 `0`；而备份缺失/损坏、UI 未打补丁或语法/哈希异常、`CL` 不对齐、启动器缺 `Exec=` / 含不支持的 `env -S` 包装器、或 `ON` 状态下指向缺失目录时，统一返回退出码 `1` 并列出全部问题。注意：启动器为 `ON` 仅代表磁盘配置就绪，若后台已有旧 `language_server` 进程在运行，`live proc` 行会提示重启应用使其生效。
-
-### 一键停用与完整还原
-
-```bash
-# 轻量停用：仅移除 .desktop 中的 AGY_UI_BUNDLE 开关并刷新桌面缓存（重启即回原厂内置 UI）
-node ~/antigravity-uipatch/antigravity_uipatch.mjs disable
-
-# 完整卸载：经配对校验后原子还原原版 app.asar，关闭启动器开关
+# 卸载还原：校验配对备份后原子还原原版 app.asar（若手动改过 .desktop 可自行删去环境变量）
 sudo node ~/antigravity-uipatch/antigravity_uipatch.mjs restore --user "$USER"
-
-# 若配置了 Pacman 自动更新 Hook，一并移除系统只读副本与 Hook 文件
-sudo rm -f /etc/pacman.d/hooks/99-antigravity-uipatch.hook
-sudo rm -rf /usr/local/share/antigravity-uipatch
-
-# （可选）确认不再需要后清理用户目录下的外置 UI 与备份
-# 注：你在 Developer 面板中的个人开关偏好独立保存在 ~/.config/Antigravity/app_storage.json，不会被误删
-rm -rf ~/.local/share/antigravity-uipatch ~/.local/share/antigravity-uipatch-backup
 ```
 
+常用的其余子命令包括 `repair`（不触碰 `app.asar`，仅重新提取并修补外置 UI）与 `extract <dir>`（导出未修补的原厂前端资源）；所有命令均支持 `--dry-run` 零写入预演。完整参数说明见 [《CLI 命令参考、安全机制与支持契约》](docs/cli-and-support-scope.md)。
+
 ---
 
-## 8. 支持范围与状态契约（Support Scope）
+## 文档导航
 
-本节明确“本工具保证什么”与“明确不做什么”，避免把有意的工程边界误判为隐式承诺。
+详细使用指南、遥测指标解释、开关目录与底层逆向报告均收纳于 [`docs/`](docs/) 目录：
 
-### 8.1 已验证环境
-
-| 项目 | 状态 |
+| 文档 | 内容概要 |
 |---|---|
-| 平台 | Linux x86-64（已实测验证） |
-| Antigravity | `main` 主线：`2.31.0-1` / `CL 1017595969`（Electron `44.9.1`）；`v2.29` 标签：`2.29.1-1` / `CL 1015941558` |
-| Node.js | `v26.13.1` 实跑验证；`>= 18` 为标准库 API 预期兼容下限，未逐版本建立测试矩阵 |
-| 运行依赖 | 仅 Node.js 标准库，无第三方 npm 依赖 |
-
-### 8.2 补丁对象与前端结构
-
-- 仅替换 ASAR 中的固定**普通打包条目** `dist/languageServer.js`；**绝不修改** `language_server` 二进制。
-- 5 处前端补丁依赖**当前已验证的结构签名**（自动捕获 Closure Compiler 重命名的局部变量与函数名，避免常规重编译破坏升级同步）。若上游改动了目标函数的真实语法结构导致匹配数不为 `1`，工具会 **fail-closed 退出（退出码 `3`）**，绝不产出半成品；不承诺跨任意未来重构自动兼容（唯一例外：当未来上游在 `buildBindings` 中已恢复非空原生 `contextUsageIndicator` 且同时重构了内部会话 Hook 时，默认 `custom` 模式会安全退让并保留上游原生组件，避免阻断升级同步）。
-- 底部开关选择器组件（`EGb()`）采用“严格结构扫描 + 嵌套 `function` 声明安全网”：遇到注释（`//`、`/*`）或无法明确判定为除法的 `/` 一律拒绝。**已知边界**：该扫描器并非完整 JS 词法解析器，仅面向当前已验证的编译组件结构设计，不承诺对任意合成 JS 语法提供完备词法级证明。
-
-### 8.3 ASAR / ZIP 格式范围
-
-- ASAR 支持当前 Chromium Pickle 归档格式及 `unpacked`、`link` 条目的**原样保留**；不支持将 `link` 节点作为替换目标（本工具仅替换固定的普通条目）。
-- ZIP 支持单卷非加密的 `STORE (0)` / `DEFLATE (8)` 及流式 data descriptor 标志；**不支持** ZIP64、分卷/多盘、加密或数字签名扩展。单条目上限 `128 MiB`、整包解压预算 `512 MiB`（当前前端资源远小于阈值）。
-- ZIP 条目名拒绝空段、`.` 段、`..`、前导 `/` 与反斜线；按规范化路径去重并拦截文件/目录同名冲突（如 `a` 与 `a/`）。
-
-### 8.4 桌面启动器 `Exec=` 范围
-
-- 严格区分两层编码：写入时先对单个参数执行 **Exec argv 层引号与转义**（含 `%` → `%%`），拼接后再整体执行 **GKeyFile 字符串层转义**（`\` 双写、换行/制表符转义、行首空格 `\s`）；读取时按相反顺序解码。
-- 支持直接命令，以及 `env` / `/usr/bin/env` 前缀下的**已列明选项**（无参 `-i`/`--ignore-environment`、`-0`/`--null`、`-v`/`--debug`，带参 `-u`/`--unset`、`-C`/`--chdir`，以及选项终止符 `--`）与**任意多个** `NAME=value` 赋值；本工具注入的赋值恒位于选项之后、程序名之前，程序名之后的同形参数按普通参数原样保留。
-- **不支持** `env -S` / `--split-string`、未知 `env` 选项及复杂 shell 包装器：遇到此类形式会**明确拒绝改写（退出码 `3`）或在 `verify` 中报告不可用**，绝不静默猜测为 `OFF`。
-- 对受支持格式，`disable` 与 `restore` 承诺保持 `argv` 参数语义、未触碰参数的原始引号及其他环境变量不变（单空格分隔的标准行可逐字节往返，连续空白分隔符会规范化为单空格；首次修改前的原始文件亦备份于 `~/.local/share/antigravity-uipatch-backup/antigravity.desktop.orig`）。
-
-### 8.5 路径与权限边界
-
-- 普通用户的授权根（`$HOME`、`--ui-dir`）**可以**是符号链接：工具将其解析一次到物理根，此后**根以下**出现任何符号链接均中止写入。
-- Pacman Hook 的 Root 脚本审计拒绝词法路径上的任何符号链接，并在 `realpath` 解析后的物理祖先链上逐级复核 `uid === 0` 且 `mode & 0o022 === 0`。
-- 上述非竞争路径检查**不等同于**操作系统内核级无 TOCTOU 保证；未在宿主 Root 环境下执行真实提权利用实验。
-
-### 8.6 持久化与并发边界
-
-- `2.31` 桌面端持久层由上游内置 `clientStorageFeature`（`fgd(window.nativeStorage)` → `~/.config/Antigravity/app_storage.json`）通过 `flushDelayer` 合并落盘；本工具直接绑定该 `storageService` 的同步缓存与 `onDidChange` 事件流，并在主 Mendel 请求前通过 `__agyHydrateDevStorage`（`2000ms` 超时保护 + `8000ms` 桥接宽限期）预热内存覆盖表，不引入竞争写入器。
-- **不保证跨窗口 / 跨 renderer 的事务强一致性**——宿主内置 `StorageManager` 采用全表 read-modify-write 实现，属于上游架构边界。
-- 在无 `window.nativeStorage` 的纯浏览器环境下，自动回退至同源 `window.localStorage`（不跨随机端口共享）。
-
-### 8.7 账号与实验表解析语义
-
-- 主通道（`Ola()`）与次级通道（`Qt().getMendelFlags`）共用 `__agyResolveExperiments()` 与 `__agyNormalizeMendel()`：
-  - **服务端成功返回非空数组**：更新 `__agyLastGood` 并原样保留线上实验表，仅确保 `FLAGS`（`enable-developer-mode` 与 `enable-context-usage-indicator`）开启；
-  - **服务端成功返回空数组 `[]`**（含网关模式常见响应 `{"experimentConfig":{}}` 经 Protobuf 解码补全为空数组的情形）：视为服务端撤回实验表（如切换至网关模式），**清空 `__agyLastGood` 并采用静态观测基线**；若响应连外层 `experimentConfig` 消息本身都缺失（顶层 `{}`），解码结果为 `undefined`，将按未知/异常响应保留上一次缓存；
-  - **RPC 请求抛出异常**：两条通道均捕获异常并回退至 `__agyLastGood`（从未成功拉取过实时表时回退静态基线）。
-- `41 + 7` 静态基线为**指定账号与构建版本下的实测快照**，不承诺所有 Google 账号、地区或未来时段云端下发集合恒等。
-
-### 8.8 退出码契约
-
-| 退出码 | `antigravity_uipatch.mjs` 含义 | `verify_live.mjs` 含义 |
-|---:|---|---|
-| `0` | 命令成功完成；或 `verify` 确认为健康的 `ON` / 明确主动停用的 `OFF` | 全部在线 HTTP / Connect RPC 与 10 项静态包内断言通过 |
-| `1` | `verify` 判定存在健康问题（含启动器 `INVALID`/`UNKNOWN`），或目标不可写等运行期错误 | 在线断言不匹配或 HTTP / RPC 响应失败 |
-| `2` | 命令行参数错误、目标账号非法（如解析到 UID 0）或 Hook 脚本路径未通过 Root 审计 | 命令行参数非法，或独立引擎启动失败（含二进制缺失、`spawn` 失败、早退及等待监听端口超时） |
-| `3` | 安全或兼容性故障闭合拒绝（锚点失配、V8 语法失败、CRC32/ZIP 异常、不可信备份、不支持的启动器形式、非空提取目录、符号链接拦截等） | — |
-
-`--dry-run` 仅检查该子命令可只读判定的前置条件，不承诺真实写入时刻的文件系统权限、剩余空间或外部并发状态永不变化。
-
-### 8.9 发布物范围
-
-本仓库仅包含原创脚本、自动化测试与技术文档，以及为定点修补所需的少量原厂代码锚点字符串与默认免责声明基线载荷；**绝不分发**提取出的 Antigravity Web UI 编译资源。
+| **[《原理与使用指南》](docs/overview-and-guide.md)** | 三层架构通俗导读、**上下文与输出速率指示器各指标定义与实机现象问答**（完成态快照、Prefix KV 缓存分母、`TTFT` 与上下文长度、工具调用突发 `Out speed`、双列表懒加载） |
+| **[《实验特性开关全景目录》](docs/custom-flags-catalog.md)** | 全部 **107 项 `customFlag`** 与 **23 个直读实验键**的线上基线状态、推荐加分项与避坑提醒 |
+| **[《CLI 命令参考、安全机制与支持契约》](docs/cli-and-support-scope.md)** | 全部子命令与全局选项、验证与扫描工具（`verify_live.mjs` / `inspect_flags.mjs` / 44 项单测）、安全边界与退出码契约 |
+| **[《补丁架构与脚本实现详解》](docs/patch-internals.md)** | 尾部追加式无损 ASAR 打包、内嵌 ZIP 解析、`main.js` 五处结构化汇聚点补丁与 `language_server` 遥测逆向细节 |
+| **[《Mendel 门控取证报告》](docs/mechanism-mendel-gating.md)** | 前端三轨门控调用链、Google OAuth 384 项线上快照对比、8 条候选注入路径实测与 Electron Fuses 分析 |
 
 ---
 
-## 9. 致谢与配套项目
+## 配套项目与致谢
 
-本项目与以下同系列研究仓库共同构成 Antigravity 客户端本地机制审计与增强工具集，三者职责正交、可独立或组合使用：
+本项目与以下同系列仓库职责正交，可独立或组合使用：
 
 - **[`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock)**：解除 Antigravity 桌面端 `language_server` 在 Google OAuth 原生通道下的 256K 本地上下文自动压缩限制。
 - **[`agy-context-unlock`](https://github.com/MatrixC7/agy-context-unlock)**：解除命令行工具 `antigravity-cli`（`/usr/bin/agy`）的 256K 本地上下文压缩限制并恢复 `/model` 与 `settings.json` 持久化闭环。
@@ -324,6 +132,6 @@ rm -rf ~/.local/share/antigravity-uipatch ~/.local/share/antigravity-uipatch-bac
 
 ---
 
-## 10. 许可证
+## 许可证
 
-本项目基于 [MIT License](LICENSE) 发布（仅涵盖本仓库内的原创脚本与文档代码；运行期在本机提取的 Antigravity Web UI 资源归属 Google 所有，永不随本仓库分发）。
+本项目基于 [MIT License](LICENSE) 发布（仅涵盖本仓库内的原创脚本、测试与文档代码；运行期在本机提取的 Antigravity Web UI 资源归属 Google 所有，永不随本仓库分发）。

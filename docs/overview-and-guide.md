@@ -1,6 +1,7 @@
 # 原理与使用指南：Antigravity 桌面端实验开关门控与上下文推理遥测面板
 
 > 本文档面向希望快速理解 Antigravity 桌面端在“企业网关模式”与“Google 原生账号模式”下部分前端界面（`Extensions` 插件菜单、内置 `Terminal`、多标签右侧栏、原生 `File Explorer` 标签页、`Settings -> Developer` 面板）被隐藏的真实原因、**`2.30+` 上下文容量与双层推理遥测指示器（`Context & Inference Indicator`）的指标含义与实机读数规律**、三层解耦补丁的工作方式、跨随机端口持久化机制以及日常升级维护流程的用户与开发者。底层协议验证、字节级补丁对比与完整开关清单请参阅配套技术文档：
+> - [《CLI 命令参考、安全机制与支持契约》（`cli-and-support-scope.md`）](cli-and-support-scope.md)
 > - [《补丁架构与脚本实现详解》（`patch-internals.md`）](patch-internals.md)
 > - [《技术报告：Mendel 实验开关门控机制与本地注入路径实测取证》（`mechanism-mendel-gating.md`）](mechanism-mendel-gating.md)
 > - [《技术参考：Antigravity 桌面端实验特性开关全景目录》（`custom-flags-catalog.md`）](custom-flags-catalog.md)
@@ -205,18 +206,18 @@ Avg TTFT           1.74s   Avg Duration             4.08s
 | **开关候选框滚动体验** | — | 原生 `<datalist>` 弹窗白底且**无法滚动** | **深色主题向上展开，支持滚轮 / 键盘导航 / 自动滚动入视区，含 ARIA listbox 语义** |
 | **误删/误覆盖防护** | — | — | **`--dry-run` 绝对零写入；`extract` 拒绝非空目录；UI 切换双失败时保留旧副本并给出恢复路径** |
 | **是否修改 `language_server` 二进制** | 否 | 否 | **否**（纯内存只读提取内嵌 ZIP） |
-| **临时回退原厂 UI 成本** | — | — | 执行 `disable` 移除桌面启动器环境变量即可（`verify` 识别主动 `OFF` 状态并返回 `0`） |
+| **临时回退原厂 UI 成本** | — | — | 不带 `AGY_UI_BUNDLE` 环境变量启动即可直接运行原厂内置 UI |
 
 ---
 
 ## 4. 常见注意事项与边界说明
 
-1. **务必从系统应用菜单（桌面启动器）启动 Antigravity**：
-   - `AGY_UI_BUNDLE` 环境变量写入在 `~/.local/share/applications/antigravity.desktop` 的 `Exec=` 行中。若直接在终端裸敲 `antigravity` 命令且当前 shell 未导出 `AGY_UI_BUNDLE`，由于 `app.asar` 钩子处于惰性状态，应用会按原厂内置 UI 启动（这也是紧急排查时免卸载回退原厂 UI 的快捷方式）。
+1. **启动时需传入 `AGY_UI_BUNDLE` 环境变量**：
+   - `install` 不会自动改写你的 `.desktop` 文件。由于 `app.asar` 钩子处于惰性状态，需在 `.desktop` 的 `Exec=` 行或终端启动命令中指定 `AGY_UI_BUNDLE`（默认提取路径为 `~/.local/share/antigravity-uipatch`；注意 `.desktop` 中不展开 `$HOME`，请填写绝对路径）。反之，不带该环境变量启动即为原厂内置 UI。
 2. **KDE Plasma 桌面缓存（`ksycoca6`）机制**：
-   - KDE 启动器通过二进制服务缓存索引 `.desktop` 文件。手动编辑 `.desktop` 后若未刷新缓存，短时间内从菜单启动仍可能读取旧环境变量。本工具的 `install`、`sync`、`disable`、`restore` 均会自动调用 `kbuildsycoca6 --noincremental` 与 `update-desktop-database` 完成刷新。
-3. **切勿在未执行 `disable` 的情况下直接删除 `~/.local/share/antigravity-uipatch` 目录**：
-   - `language_server` 的 `--web_bundle_path` 参数在目标目录不存在时不会回退至内嵌 ZIP，而是直接返回 `HTTP 500`（表现为空白窗口）。如需清理外置 UI 目录，请先运行 `node antigravity_uipatch.mjs disable`（或 `restore`）。
+   - KDE 启动器通过二进制服务缓存索引 `.desktop` 文件。手动编辑 `~/.local/share/applications/antigravity.desktop` 后若未立即生效，可在终端运行一次 `kbuildsycoca6 --noincremental` 刷新缓存。
+3. **切勿在仍传入 `AGY_UI_BUNDLE` 的情况下直接删除 `~/.local/share/antigravity-uipatch` 目录**：
+   - `language_server` 的 `--web_bundle_path` 参数在目标目录不存在时不会回退至内嵌 ZIP，而是直接返回 `HTTP 500`（表现为空白窗口）。如需清理外置 UI 目录，请先去掉启动环境变量或执行 `restore`。
 4. **软件包升级后请同步更新外置 UI（推荐配置 Pacman Hook）**：
    - 当系统更新 `antigravity` 软件包时，`app.asar` 与 `language_server` 会同时更新。运行 `sync`（或配置本仓库提供的 `pacman/99-antigravity-uipatch.hook`）会自动从**新版** `language_server` 重新提取并修补前端代码，避免出现“旧版外置前端搭配新版后端 API”的版本错位，同时完整保留你在 `app_storage.json` 中的自定义开关配置。
 5. **误开危险开关后的离线应急恢复**：

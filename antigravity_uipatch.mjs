@@ -60,18 +60,18 @@
  *      external builds), displaying `TokenType` sub-group breakdown, actual
  *      backend `responseModel`, output `TPS` (with optional toolbar pin toggle),
  *      `TTFT`, `Cache hit`, `Duration`, `Output`, `Thinking` tokens, and retry badges.
- * 3. Desktop launcher switch (`~/.local/share/applications/antigravity.desktop`):
- *    adds `AGY_UI_BUNDLE=<ui-dir>` and refreshes KDE `ksycoca6`.
+ * 3. Runtime activation (`AGY_UI_BUNDLE=<ui-dir>`):
+ *    passed manually by the user via `.desktop` launcher or terminal environment.
  *
  * Commands
  * --------
  *   self-test     validate ASAR round-trip, embedded ZIP CRC32, anchors & V8 syntax (read-only)
- *   install       apply hook, extract & patch Web UI, and enable .desktop switch (alias: patch)
+ *   install       apply ASAR hook and extract & patch Web UI (alias: patch)
  *   sync          post-upgrade full re-sync for Pacman hooks (supports --user, --quiet)
  *   repair        re-extract & re-patch Web UI from current language_server without touching ASAR
- *   verify        report build CL, hook/UI/launcher states, and backup pairing (alias: status)
- *   disable       remove AGY_UI_BUNDLE from .desktop launcher (instant fallback to stock UI)
- *   restore       atomically restore paired pristine app.asar and disable switch (alias: uninstall)
+ *   verify        report build CL, hook/UI states, backup pairing & optional launcher status (alias: status)
+ *   disable       remove AGY_UI_BUNDLE from .desktop launcher if configured
+ *   restore       atomically restore paired pristine app.asar (alias: uninstall)
  *   extract       dump unpatched stock Web UI from language_server to a directory
  *   pacman-hook   print or write a root-safe Pacman PostTransaction hook
  *
@@ -2926,10 +2926,11 @@ function refreshDesktopCache(account) {
   return ok;
 }
 
-function reclaimUserOwnership(paths) {
+function reclaimUserOwnership(paths, { includeDesktop = false } = {}) {
   if (process.getuid?.() !== 0 || !paths.account.user) return null;
   const spec = `${paths.account.uid}:${paths.account.gid}`;
-  const targets = [paths.ui, paths.backup, paths.desktop].filter((p) => fs.existsSync(p));
+  const rawTargets = includeDesktop ? [paths.ui, paths.backup, paths.desktop] : [paths.ui, paths.backup];
+  const targets = rawTargets.filter((p) => fs.existsSync(p));
   for (const t of targets) {
     try {
       execFileSync('chown', ['-R', spec, t], { stdio: 'ignore' });
@@ -3188,27 +3189,6 @@ function buildPatchedUiAtomic(paths, patchOpts = {}) {
   return commitPatchedUi(paths, preparePatchedUi(paths, patchOpts));
 }
 
-function ensureDesktopSwitch(paths) {
-  if (!fs.existsSync(paths.desktop)) {
-    if (!fs.existsSync(paths.sysDesktop)) {
-      return { changed: false, reason: `${paths.desktop} not found` };
-    }
-    fs.mkdirSync(path.dirname(paths.desktop), { recursive: true });
-    fs.copyFileSync(paths.sysDesktop, paths.desktop);
-  }
-  const bakDesktop = path.join(paths.backup, 'antigravity.desktop.orig');
-  if (!fs.existsSync(bakDesktop)) {
-    fs.mkdirSync(paths.backup, { recursive: true });
-    atomicWriteFile(bakDesktop, fs.readFileSync(paths.desktop), { mode: 0o600 });
-  }
-  const raw = fs.readFileSync(paths.desktop, 'utf8');
-  const { text, changed } = patchDesktopText(raw, paths.ui, ENV_VAR);
-  if (changed) {
-    atomicWriteFile(paths.desktop, text, { mode: 0o600 });
-  }
-  return { changed };
-}
-
 // ---------------------------------------------------------------------------
 // 6. CLI Subcommands
 // ---------------------------------------------------------------------------
@@ -3354,8 +3334,6 @@ function cmdInstallOrSync(opts, { mode }) {
     throw exc;
   }
 
-  const d = ensureDesktopSwitch(paths);
-  const db = refreshDesktopCache(paths.account);
   const owned = reclaimUserOwnership(paths);
 
   if (opts.quiet) return 0;
@@ -3364,11 +3342,12 @@ function cmdInstallOrSync(opts, { mode }) {
   say(`  backup      ${C.dim(bak.path)}${bak.refreshed ? C.ok(' (refreshed)') : ''}`);
   say(`  app.asar    ${staged.asarChanged ? C.ok(`hook added (+${staged.asarDelta} B)`) : C.dim('hook already present')}`);
   say(`  ui bundle   ${C.ok(`${meta.patches.length} patches applied`)} ${C.dim(`(${paths.ui}, CL ${meta.lsVersion.cl})`)}`);
-  say(`  launcher    ${d.changed ? C.ok('updated') : C.dim('already configured')}${d.reason ? C.dim(` (${d.reason})`) : ''}`);
-  if (db) say(`  kde cache   ${C.ok('rebuilt')}`);
   if (owned) say(`  ownership   ${C.ok(`assigned to ${owned}`)}`);
   say('');
-  say(C.ok('Done.') + ' Restart Antigravity from your application menu to take effect.');
+  say(
+    C.ok('Done.') +
+      ` Launch Antigravity with ${ENV_VAR}="${paths.ui}" (in your .desktop file or terminal) to activate.`
+  );
   return 0;
 }
 
@@ -3426,6 +3405,9 @@ function cmdVerify(opts) {
     say(`asar      : ${paths.asar}`);
     say(`            sha256=${sha256(asarBuf)}`);
     say(`            state : ${asarHooked ? C.ok('PATCHED') : C.dim('PRISTINE')}`);
+    if (!asarHooked) {
+      problems.push('app.asar does not contain the hook (run \'install\' or \'sync\')');
+    }
   } catch (exc) {
     say(`asar      : ${C.err(`ERROR - ${exc.message}`)}`);
     problems.push(`app.asar unreadable: ${exc.message}`);
@@ -3464,52 +3446,41 @@ function cmdVerify(opts) {
     problems.push('paired backup missing (restore would be impossible)');
   }
 
-  // Launcher state is one of four values, never a boolean:
-  //   ON      -> our variable is present in a well-understood env prefix
-  //   OFF     -> the Exec line is well understood and simply has no override
-  //   UNKNOWN -> the launcher uses a form we cannot interpret (never guess OFF)
-  //   INVALID -> there is no usable Exec= line at all
-  let launcherState = 'UNKNOWN';
+  // Inspect ~/.local/share/applications/antigravity.desktop read-only (optional:
+  // `install` does not touch .desktop; users set AGY_UI_BUNDLE manually via
+  // .desktop or terminal/environment).
+  let launcherState = 'ABSENT';
   let launcherDetail = null;
   let launcherUiDir = null;
-  if (!fs.existsSync(paths.desktop)) {
-    launcherState = 'INVALID';
-    launcherDetail = 'launcher file is missing';
-  } else {
+  if (fs.existsSync(paths.desktop)) {
     const dt = fs.readFileSync(paths.desktop, 'utf8');
     const info = analyseDesktopExec(dt, ENV_VAR);
     if (!info.ok) {
-      launcherState = 'INVALID';
+      launcherState = 'CUSTOM';
       launcherDetail = info.unsupported;
     } else if (info.value !== null) {
       launcherState = 'ON';
       launcherUiDir = info.value;
-    } else if (!info.usesEnv) {
-      launcherState = 'OFF';
     } else {
-      // env prefix exists but our variable is absent: a clean, understood OFF.
-      launcherState = 'OFF';
+      launcherState = 'UNSET';
     }
   }
   const switchOn = launcherState === 'ON';
 
-  if (launcherState === 'INVALID') {
-    say(`launcher  : ${C.err(`INVALID - ${launcherDetail}`)} (${paths.desktop})`);
-    problems.push(`launcher is unusable: ${launcherDetail}`);
-  } else if (launcherState === 'ON') {
+  if (launcherState === 'ON') {
     say(`launcher  : ${C.ok('ON')} (${paths.desktop})`);
     say(`            bundle: ${launcherUiDir}`);
+  } else if (launcherState === 'CUSTOM') {
+    say(`launcher  : ${C.dim(`custom Exec= (${launcherDetail})`)} (${paths.desktop})`);
+  } else if (launcherState === 'UNSET') {
+    say(`launcher  : ${C.dim(`not set in ${paths.desktop} (pass ${ENV_VAR} manually via .desktop or terminal)`)}`);
   } else {
-    say(`launcher  : ${C.dim('OFF (stock UI)')} (${paths.desktop})`);
+    say(`launcher  : ${C.dim(`manual (pass ${ENV_VAR} via .desktop or terminal)`)}`);
   }
 
   const uiDir = launcherUiDir || paths.ui;
   const mainPath = path.join(uiDir, 'main.js');
   const metaPath = path.join(uiDir, 'uipatch.json');
-  // When the launcher is deliberately OFF, the referenced bundle is not in use,
-  // so a missing bundle is not an error — only report it as an informational
-  // note. Residual assets are a separate concern from "is this install healthy".
-  const uiInUse = switchOn;
   let uiOk = false;
   if (fs.existsSync(mainPath)) {
     const js = fs.readFileSync(mainPath, 'utf8');
@@ -3585,16 +3556,13 @@ function cmdVerify(opts) {
     if (!fs.existsSync(indexPath)) {
       problems.push('UI bundle is missing index.html (engine would serve a blank page)');
     }
-  } else if (uiInUse) {
-    say(`ui bundle : ${uiDir} ${C.err('(ABSENT)')}`);
-    problems.push('UI bundle absent but the launcher references it');
   } else {
-    say(`ui bundle : ${uiDir} ${C.dim('(ABSENT, not in use - launcher is OFF)')}`);
+    say(`ui bundle : ${uiDir} ${C.err('(ABSENT)')}`);
+    problems.push(`patched UI bundle absent at ${uiDir} (run 'install' or 'repair')`);
   }
 
-  let switchResolved = false;
   if (switchOn && launcherUiDir) {
-    switchResolved =
+    const switchResolved =
       fs.existsSync(launcherUiDir) && fs.existsSync(path.join(launcherUiDir, 'main.js'));
     if (!switchResolved) {
       problems.push(`launcher points at a missing bundle: ${launcherUiDir}`);
@@ -3613,19 +3581,11 @@ function cmdVerify(opts) {
       const active = procs.some((l) => l.includes('--web_bundle_path='));
       say(
         `live proc : ${procs.length} instance(s), ${
-          active ? C.ok('--web_bundle_path active') : C.warn('running stock UI (restart needed)')
+          active ? C.ok('--web_bundle_path active') : C.warn(`running stock UI (launch with ${ENV_VAR}="${uiDir}")`)
         }`
       );
     }
   } catch {}
-
-  // A switch that is deliberately OFF is a valid, documented state (stock UI),
-  // so it must not be reported as "unhealthy" with no explanation.
-  if (!problems.length && !switchOn) {
-    say('');
-    say(C.dim('launcher is OFF: the stock built-in UI is active by design (run \'install\' to re-enable).'));
-    return 0;
-  }
 
   if (problems.length > 0) {
     say('');
@@ -3634,7 +3594,7 @@ function cmdVerify(opts) {
     return 1;
   }
 
-  return asarHooked && uiOk && switchOn && switchResolved ? 0 : 1;
+  return asarHooked && uiOk ? 0 : 1;
 }
 
 function cmdDisable(opts) {
@@ -3655,7 +3615,7 @@ function cmdDisable(opts) {
   }
   atomicWriteFile(paths.desktop, text, { mode: 0o600 });
   refreshDesktopCache(paths.account);
-  reclaimUserOwnership(paths);
+  reclaimUserOwnership(paths, { includeDesktop: true });
   say(C.ok('Launcher switch removed. Restart Antigravity to use stock built-in UI.'));
   return 0;
 }
@@ -3690,8 +3650,8 @@ function cmdRestore(opts) {
   if (opts.dryRun) {
     say(
       identical
-        ? `dry-run: app.asar already identical to backup; would only remove the launcher switch from ${paths.desktop}`
-        : `dry-run: would restore ${paths.asar} from ${bakAsar} and remove the launcher switch`
+        ? 'dry-run: app.asar already identical to backup (nothing written)'
+        : `dry-run: would restore ${paths.asar} from ${bakAsar}`
     );
     return 0;
   }
@@ -3708,7 +3668,6 @@ function cmdRestore(opts) {
     say('asar      : already identical to backup');
   }
 
-  cmdDisable(opts);
   reclaimUserOwnership(paths);
   return 0;
 }
@@ -3906,12 +3865,12 @@ Usage:
 
 Commands:
   self-test             Read-only check: ASAR round-trip, ZIP CRC32, anchors & V8 syntax
-  install               Apply ASAR hook, extract & patch Web UI, enable .desktop switch (alias: patch)
-  sync                  Post-upgrade full sync for Pacman hooks (refreshes backup & Web UI)
+  install               Apply ASAR hook and extract & patch Web UI (alias: patch)
+  sync                  Post-upgrade full sync for Pacman hooks (refreshes backup, hook & Web UI)
   repair                Re-extract & re-patch Web UI from current language_server only
-  verify                Show engine CL, hook/UI/launcher states & backup pairing (alias: status)
-  disable               Remove AGY_UI_BUNDLE from .desktop launcher (instant stock UI fallback)
-  restore               Atomically restore paired pristine app.asar & disable switch (alias: uninstall)
+  verify                Show engine CL, hook/UI states, backup pairing & launcher status (alias: status)
+  disable               Remove AGY_UI_BUNDLE from .desktop launcher if present
+  restore               Atomically restore paired pristine app.asar (alias: uninstall)
   extract [dir]         Extract unpatched stock Web UI into a new or empty directory
   pacman-hook           Print (or --write <file>) a root-safe Pacman PostTransaction hook
 
