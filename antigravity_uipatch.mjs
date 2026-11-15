@@ -1105,7 +1105,7 @@ export const PATCH_MENDEL_OVERRIDES = {
         `this.stateProvider.setState(this.stateProvider.getState());` +
         `try{try{d(await c(this.lsClient.setMendelFlagOverrides(${pbCreate}(${ovrSchema},{overrides:b}))))}catch{d()}}` +
         `finally{c();this.stateProvider.setState(this.stateProvider.getState())}});` +
-        `try{var __agySelf=this;` +
+        `try{var __agySelf=this;globalThis.__agyLsClient=__agySelf.lsClient;` +
         `this.__agyDisposeNotifier=__agyRegisterNotifier(function(){__agySelf.stateProvider.setState(__agySelf.stateProvider.getState())});` +
         `if(this.flagOverrideSync&&typeof this.flagOverrideSync.set==="function"){` +
         `var __agyOrigSet=this.flagOverrideSync.set.bind(this.flagOverrideSync);` +
@@ -1454,7 +1454,8 @@ function buildContextIndicatorSource({
   portalNs,
   useConvStateSym,
   cortexNs,
-  commonNs,
+  pbCreateGen,
+  genMetaReqSchema,
 }) {
   const R = reactIdent;
   return `(function(){
@@ -1462,24 +1463,68 @@ function buildContextIndicatorSource({
       SUB_KEY="agy.uipatch.indicatorSubOpen",
       CIRC=2*Math.PI*6,
       CTX_SEL={selector:function(s){return s?s.agentState:void 0}},
-      prefSubs=[];
-  function readPref(k,defVal){
+      prefSubs=[],
+      convTimings=Object.create(null),
+      convTimingOrder=[],
+      rpcGenStore=Object.create(null),
+      rpcGenOrder=[];
+  function getTimingMap(cid){
+    var k=String(cid||"");
+    if(!k)return null;
+    var m=convTimings[k];
+    if(!m){
+      m=Object.create(null);
+      convTimings[k]=m;
+      convTimingOrder.push(k);
+      if(convTimingOrder.length>24){
+        var old=convTimingOrder.shift();
+        if(old)delete convTimings[old];
+      }
+    }
+    return m;
+  }
+  function getRpcGenEntry(cid){
+    var k=String(cid||"");
+    if(!k)return null;
+    var e=rpcGenStore[k];
+    if(!e){
+      e={items:[],fetching:!1,settledLen:-1};
+      rpcGenStore[k]=e;
+      rpcGenOrder.push(k);
+      if(rpcGenOrder.length>16){
+        var old=rpcGenOrder.shift();
+        if(old)delete rpcGenStore[old];
+      }
+    }
+    return e;
+  }
+  function readRawPref(k){
     try{
       if(typeof __agyStorageSvc!=="undefined"&&__agyStorageSvc&&typeof __agyStorageSvc.get==="function"){
         var sv=__agyStorageSvc.get(k);
-        if(sv==="true")return !0;
-        if(sv==="false")return !1;
+        if(typeof sv==="string"&&sv)return sv;
       }
       if(typeof window!=="undefined"&&window.localStorage){
         var lv=window.localStorage.getItem(k);
-        if(lv==="true")return !0;
-        if(lv==="false")return !1;
+        if(typeof lv==="string"&&lv)return lv;
       }
     }catch{}
+    return "";
+  }
+  function readPref(k,defVal){
+    var v=readRawPref(k);
+    if(v==="true")return !0;
+    if(v==="false")return !1;
     return defVal;
   }
+  function readPinMode(){
+    var v=readRawPref(PIN_KEY);
+    if(v==="turn"||v==="avg"||v==="off")return v;
+    if(v==="true")return "avg";
+    return "off";
+  }
   function writePref(k,val){
-    var s=val?"true":"false";
+    var s=typeof val==="string"?val:(val?"true":"false");
     try{
       if(typeof __agyStorageSvc!=="undefined"&&__agyStorageSvc&&typeof __agyStorageSvc.store==="function"){
         __agyStorageSvc.store(k,s);
@@ -1521,32 +1566,54 @@ function buildContextIndicatorSource({
     var p=(part/tot)*100;
     return p<0.1?"<0.1%":p.toFixed(1)+"%";
   }
-  function fmtSec(s,trailingEllipsis){
+  function fmtCachePct(cacheRead,totIn){
+    if(!(totIn>0))return "\\u2014";
+    if(!(cacheRead>0))return "0.0%";
+    if(cacheRead>=totIn)return "100.0%";
+    var p=(cacheRead/totIn)*100;
+    if(p<0.1)return "<0.1%";
+    if(p>=99.95)return "99.9%";
+    return p.toFixed(1)+"%";
+  }
+  function fmtDur(s,approxPrefix){
     if(!(s>0)||!Number.isFinite(s))return "\\u2014";
-    var txt=s<10?s.toFixed(2)+"s":s.toFixed(1)+"s";
-    return trailingEllipsis?txt+"\\u2026":txt;
-  }
-  function cleanModel(raw){
-    if(!raw||typeof raw!=="string")return "";
-    return raw
-      .replace(/^projects\\/[^/]+\\/locations\\/[^/]+\\/publishers\\/[^/]+\\/models\\//,"")
-      .replace(/^publishers\\/[^/]+\\/models\\//,"")
-      .replace(/^models\\//,"");
-  }
-  function resolveModelInfo(cm,lastPr){
-    var raw=(cm&&(cm.responseModelFull||cm.responseModel))||"";
-    if(raw)return {short:cleanModel(raw),raw:raw};
-    var disp=(cm&&cm.modelDisplayName)||(lastPr&&lastPr.metadata&&lastPr.metadata.modelInfo&&lastPr.metadata.modelInfo.label)||"";
-    if(disp)return {short:disp,raw:disp};
-    var code=(cm&&cm.model)||(lastPr&&lastPr.metadata&&lastPr.metadata.generatorModel);
-    var MD=${commonNs}&&${commonNs}.Model;
-    if(code&&MD&&typeof MD[code]==="string"&&MD[code].indexOf("UNSPECIFIED")===-1){
-      var pretty=MD[code].replace(/^MODEL_/,"").toLowerCase().replace(/_/g,"-");
-      return {short:pretty,raw:MD[code]};
+    var pre=approxPrefix?"~":"";
+    if(s>=3599.5){
+      var h=Math.floor((s+0.5)/3600),rem=Math.round(((s+0.5)%3600)/60);
+      if(rem>=60){h+=1;rem=0}
+      return pre+h+"h "+(rem<10?"0":"")+rem+"m";
     }
-    return {short:"",raw:""};
+    if(s>=59.95){
+      var m=Math.floor((s+0.05)/60),sec=Math.round(s%60);
+      if(sec>=60){m+=1;sec=0}
+      return pre+m+"m "+(sec<10?"0":"")+sec+"s";
+    }
+    return pre+(s<10?s.toFixed(2)+"s":s.toFixed(1)+"s");
   }
-  function deriveContextMetrics(agentState,tracker,nowMs){
+  function fmtTps(tps){
+    if(!(tps>0)||!Number.isFinite(tps))return "\\u2014";
+    if(tps>=1e6)return (tps/1e6).toFixed(2)+"M t/s";
+    if(tps>=1e3)return (tps/1e3).toFixed(1)+"K t/s";
+    return tps.toFixed(1)+" t/s";
+  }
+  function extractErrStr(e){
+    if(!e)return "";
+    if(typeof e==="string")return e;
+    if(typeof e==="object"){
+      if(typeof e.userErrorMessage==="string"&&e.userErrorMessage)return e.userErrorMessage;
+      if(typeof e.shortError==="string"&&e.shortError)return e.shortError;
+      if(typeof e.message==="string"&&e.message)return e.message;
+      if(e.error)return extractErrStr(e.error);
+    }
+    return "Generation failed";
+  }
+  function stepStartMs(md,msFirst,msEnd){
+    if(!md)return 0;
+    var c=tsMs(md.createdAt),s=tsMs(md.startedAt);
+    if(s>0&&(msFirst===0||s<msFirst)&&(msEnd===0||s<msEnd))return s;
+    return c||s;
+  }
+  function deriveContextMetrics(agentState,rpcGens){
     var cwu=agentState&&agentState.contextWindowUsage;
     if(!cwu)return null;
     var used=num(cwu.estimatedTokensUsed),max=num(cwu.maxContextTokens);
@@ -1556,7 +1623,8 @@ function buildContextIndicatorSource({
         chatType=TT.CHAT_MESSAGES!==void 0?TT.CHAT_MESSAGES:7,
         doneStatus=CS.DONE!==void 0?CS.DONE:3,
         genStatus=CS.GENERATING!==void 0?CS.GENERATING:8,
-        runStatus=CS.RUNNING!==void 0?CS.RUNNING:2;
+        runStatus=CS.RUNNING!==void 0?CS.RUNNING:2,
+        errStatus=CS.ERROR!==void 0?CS.ERROR:7;
     var rawChat=0,buckets={sys:0,tools:0,mcp:0,rules:0,agents:0,other:0};
     var tgs=Array.isArray(cwu.tokenGroups)?cwu.tokenGroups:[];
     for(var i=0;i<tgs.length;i++){
@@ -1585,149 +1653,254 @@ function buildContextIndicatorSource({
     if(buckets.other>0)groups.push(["Other",buckets.other]);
     var slice=agentState.trajectorySlice,
         steps=(slice&&Array.isArray(slice.stepsInSlice))?slice.stepsInSlice:[],
+        totalStepsLen=num(slice&&slice.totalStepsLength),
+        rawSliceStart=(slice&&slice.stepsSlice&&slice.stepsSlice.startIndex!==void 0)?num(slice.stepsSlice.startIndex):0,
+        sliceStart=rawSliceStart<0?Math.max(0,totalStepsLen+rawSliceStart):rawSliceStart,
         lastStepIdx=num(cwu.lastStepIndex),
-        approx=Boolean(cwu.estimatedAfterCompaction);
-    if(!approx){
-      for(var k=steps.length-1;k>=0;k--){
-        var st=steps[k];
-        if(!st)continue;
-        var sIdx=st.metadata&&st.metadata.sourceTrajectoryStepInfo&&st.metadata.sourceTrajectoryStepInfo.stepIndex!==void 0
-          ?num(st.metadata.sourceTrajectoryStepInfo.stepIndex):-1;
-        if(sIdx>=0&&sIdx<lastStepIdx)break;
-        if(sIdx>=lastStepIdx&&st.step&&st.step.case==="checkpoint"&&st.status===doneStatus&&!(st.step.value&&st.step.value.intentOnly)){
-          approx=!0;break;
+        approx=Boolean(cwu.estimatedAfterCompaction),
+        timingMap=getTimingMap(agentState.conversationId),
+        stepByIdx=Object.create(null),
+        isGenerating=!1;
+    for(var k=steps.length-1;k>=0;k--){
+      var st=steps[k];
+      if(!st)continue;
+      var sIdx=st.metadata&&st.metadata.sourceTrajectoryStepInfo&&st.metadata.sourceTrajectoryStepInfo.stepIndex!==void 0
+        ?num(st.metadata.sourceTrajectoryStepInfo.stepIndex):(sliceStart+k);
+      stepByIdx[sIdx]=st;
+      if(!approx&&sIdx>=lastStepIdx&&st.step&&st.step.case==="checkpoint"&&st.status===doneStatus&&!(st.step.value&&st.step.value.intentOnly)){
+        approx=!0;
+      }
+      var sCase=st.step&&st.step.case;
+      if(sCase==="plannerResponse"){
+        if(st.status===genStatus||st.status===runStatus){
+          isGenerating=!0;
+        }else if(timingMap&&st.metadata){
+          var md=st.metadata,
+              ms1=tsMs(md.viewableAt),
+              ms2=tsMs(md.finishedGeneratingAt)||tsMs(md.lastCompletedChunkAt)||tsMs(md.completedAt),
+              ms0=stepStartMs(md,ms1,ms2),
+              sErr=(st.status===errStatus||st.error)?extractErrStr(st.error||"Generation failed"):"";
+          if(ms1>ms0||ms2>ms0||sErr){
+            timingMap[sIdx]={tStart:ms0,tFirst:ms1,tEnd:ms2,err:sErr};
+          }
         }
       }
     }
-    var lastPr=null,lastPrIdx=-1;
-    for(var p=steps.length-1;p>=0;p--){
-      var cand=steps[p];
-      if(cand&&cand.step&&cand.step.case==="plannerResponse"){
-        lastPr=cand;
-        lastPrIdx=cand.metadata&&cand.metadata.sourceTrajectoryStepInfo&&cand.metadata.sourceTrajectoryStepInfo.stepIndex!==void 0
-          ?num(cand.metadata.sourceTrajectoryStepInfo.stepIndex):p;
-        break;
-      }
-    }
-    var gens=(slice&&Array.isArray(slice.generatorMetadatasInSlice))?slice.generatorMetadatasInSlice:[],
-        gen=null,cm=null;
-    for(var q=gens.length-1;q>=0;q--){
-      var gItem=gens[q];
-      var gCm=gItem&&gItem.metadata&&gItem.metadata.case==="chatModel"?gItem.metadata.value:(gItem&&gItem.chatModel);
-      if(gCm){gen=gItem;cm=gCm;break}
-    }
-    var isGen=Boolean(lastPr&&(lastPr.status===genStatus||lastPr.status===runStatus)),
-        genMatchesPr=Boolean(gen&&Array.isArray(gen.stepIndices)&&lastPrIdx>=0&&gen.stepIndices.indexOf(lastPrIdx)!==-1),
-        activeCm=(!isGen||genMatchesPr)?cm:null,
-        u=(activeCm&&activeCm.usage)||(!isGen&&lastPr&&lastPr.metadata&&lastPr.metadata.modelUsage)||null,
-        exactOut=num(u&&u.outputTokens),
-        exactThink=num(u&&u.thinkingOutputTokens),
-        exactResp=num(u&&u.responseOutputTokens);
-    if(exactOut===0&&(exactThink>0||exactResp>0))exactOut=exactThink+exactResp;
-    var mdl=resolveModelInfo(activeCm||cm,lastPr),
-        now=nowMs||Date.now(),
-        telemetry=null;
-    if(isGen&&exactOut===0){
-      var pv=(lastPr&&lastPr.step&&lastPr.step.value)||{},
-          thkStr=String(pv.rawThinking||pv.thinking||""),
-          repStr=String(pv.response||""),
-          totChars=thkStr.length+repStr.length,
-          tKey=String(agentState.conversationId||"")+":"+String(lastPrIdx);
-      if(tracker){
-        if(tracker.key!==tKey){tracker.key=tKey;tracker.startMs=totChars>0?now:0}
-        else if(totChars>0&&!tracker.startMs){tracker.startMs=now}
-      }
-      var stepStart=tsMs(lastPr&&lastPr.metadata&&lastPr.metadata.startedAt)||tsMs(lastPr&&lastPr.metadata&&lastPr.metadata.createdAt)||(tracker&&tracker.startMs)||0,
-          firstChunk=tsMs(lastPr&&lastPr.metadata&&lastPr.metadata.viewableAt)||(tracker&&tracker.startMs)||0,
-          estOut=totChars>0?Math.max(1,Math.round(totChars/4)):0,
-          estThink=thkStr.length>0?Math.max(1,Math.round(thkStr.length/4)):0,
-          streamEl=firstChunk>0&&now>firstChunk?(now-firstChunk)/1e3:0,
-          liveTps=estOut>0&&streamEl>=0.25?estOut/streamEl:0,
-          liveTtft=durSec(activeCm&&activeCm.timeToFirstToken)||(stepStart>0&&firstChunk>stepStart?(firstChunk-stepStart)/1e3:0),
-          liveDur=stepStart>0&&now>stepStart?(now-stepStart)/1e3:streamEl,
-          inTokL=num(u&&u.inputTokens),
-          cacheL=num(u&&u.cacheReadTokens),
-          cachePctL=inTokL>0&&cacheL>0?Math.min(100,(cacheL/inTokL)*100):null,
-          retL=num(activeCm&&activeCm.retries)||(activeCm&&Array.isArray(activeCm.retryInfos)?activeCm.retryInfos.length:0);
-      telemetry={
-        streaming:!0,tpsApprox:!0,model:mdl.short,rawModel:mdl.raw,
-        tps:liveTps,ttftSec:liveTtft,durSec:liveDur,
-        inTok:inTokL,cacheRead:cacheL,cachePct:cachePctL,
-        outTok:estOut,thinkTok:estThink,thinkDurSec:0,
-        retries:retL,retryWaitSec:0
-      };
-    }else if(activeCm||u||lastPr){
-      var ttft=durSec(activeCm&&activeCm.timeToFirstToken),
-          sSec=durSec(activeCm&&activeCm.streamingDuration);
-      if(!(sSec>0)&&lastPr&&lastPr.metadata){
-        var t0=tsMs(lastPr.metadata.viewableAt)||tsMs(lastPr.metadata.startedAt)||tsMs(lastPr.metadata.createdAt),
-            t1=tsMs(lastPr.metadata.finishedGeneratingAt)||tsMs(lastPr.metadata.completedAt);
-        if(t1>t0)sSec=(t1-t0)/1e3;
-      }
-      var totDur=ttft>0&&sSec>0?(ttft+sSec):(sSec>0?sSec:ttft);
-      if(!(totDur>0)&&lastPr&&lastPr.metadata){
-        var w0=tsMs(lastPr.metadata.startedAt)||tsMs(lastPr.metadata.createdAt),
-            w1=tsMs(lastPr.metadata.completedAt)||tsMs(lastPr.metadata.finishedGeneratingAt);
-        if(w1>w0)totDur=(w1-w0)/1e3;
-      }
-      var exactTps=exactOut>0&&sSec>0.02?exactOut/sSec:0,
-          inTok=num(u&&u.inputTokens),
+    function buildCall(cm,pr,tm,genErr,stepIdxHint){
+      var md=pr&&pr.metadata,
+          u=(cm&&cm.usage)||(md&&md.modelUsage)||null,
+          uncachedIn=num(u&&u.inputTokens),
           cacheRead=num(u&&u.cacheReadTokens),
-           hasCacheField=Boolean(u&&(cacheRead>0||u.cacheReadTokens!==void 0)),
-          cachePct=inTok>0&&hasCacheField?Math.min(100,(cacheRead/inTok)*100):null,
-          rInfos=(activeCm&&Array.isArray(activeCm.retryInfos))?activeCm.retryInfos:((lastPr&&lastPr.metadata&&Array.isArray(lastPr.metadata.retryInfos))?lastPr.metadata.retryInfos:[]),
-          retries=Math.max(num(activeCm&&activeCm.retries),rInfos.length),
+          cacheWrite=num(u&&u.cacheWriteTokens),
+          totIn=uncachedIn+cacheRead+cacheWrite,
+          outTok=num(u&&u.outputTokens),
+          thinkTok=num(u&&u.thinkingOutputTokens),
+          respTok=num(u&&u.responseOutputTokens);
+      if(outTok===0&&(thinkTok>0||respTok>0))outTok=thinkTok+respTok;
+      if(respTok===0&&outTok>thinkTok)respTok=outTok-thinkTok;
+      var cmTtft=durSec(cm&&cm.timeToFirstToken),
+          cmStream=durSec(cm&&cm.streamingDuration),
+          tFirst=tm?tm.tFirst:(md?tsMs(md.viewableAt):0),
+          tEnd=tm?tm.tEnd:(md?(tsMs(md.finishedGeneratingAt)||tsMs(md.lastCompletedChunkAt)||tsMs(md.completedAt)):0),
+          tStart=tm?tm.tStart:stepStartMs(md,tFirst,tEnd),
+          ttft=cmTtft>0?cmTtft:(tStart>0&&tFirst>tStart?(tFirst-tStart)/1e3:0),
+          sSec=cmStream>0?cmStream:(tFirst>0&&tEnd>tFirst?(tEnd-tFirst)/1e3:(!(ttft>0)&&tStart>0&&tEnd>tStart?(tEnd-tStart)/1e3:0)),
+          dur=(cmTtft>0&&cmStream>0)
+            ?(cmTtft+cmStream)
+            :(tStart>0&&tEnd>tStart?(tEnd-tStart)/1e3:(ttft>0&&sSec>0?(ttft+sSec):(sSec>0?sSec:ttft))),
+          inTps=totIn>0&&ttft>0.01?totIn/ttft:0,
+          outTps=outTok>0&&sSec>0.02?outTok/sSec:0,
+          hasCache=Boolean(u&&(totIn>0||cacheRead>0||u.cacheReadTokens!==void 0)),
+          rInfos=(cm&&Array.isArray(cm.retryInfos))?cm.retryInfos:((md&&Array.isArray(md.retryInfos))?md.retryInfos:[]),
+          retries=(cm&&cm.retries!==void 0&&num(cm.retries)>0)?num(cm.retries):(rInfos.length>1?rInfos.length-1:0),
           rWait=0;
       for(var rw=0;rw<rInfos.length;rw++)rWait+=durSec(rInfos[rw]&&rInfos[rw].waitTime);
-      var thkDur=durSec(lastPr&&lastPr.step&&lastPr.step.value&&lastPr.step.value.thinkingDuration);
-      if(mdl.short||exactOut>0||ttft>0||totDur>0||cachePct!==null||retries>0){
-        telemetry={
-          streaming:!1,tpsApprox:!1,model:mdl.short,rawModel:mdl.raw,
-          tps:exactTps,ttftSec:ttft,durSec:totDur,
-          inTok:inTok,cacheRead:cacheRead,cachePct:cachePct,
-          outTok:exactOut,thinkTok:exactThink,thinkDurSec:thkDur,
-          retries:retries,retryWaitSec:rWait
-        };
+      var stepErr=tm?tm.err:((pr&&(pr.status===errStatus||pr.error))?extractErrStr(pr.error||"Generation failed"):""),
+          errMsg=genErr||stepErr,
+          errs=errMsg?1:0;
+      if(!(totIn>0||outTok>0||ttft>0||dur>0||hasCache||retries>0||errs>0))return null;
+      return {
+        stepIdx:stepIdxHint,
+        inTps:inTps,ttftSec:ttft,outTps:outTps,sSec:sSec,durSec:dur,
+        uncachedIn:uncachedIn,cacheRead:cacheRead,cacheWrite:cacheWrite,totIn:totIn,
+        hasCache:hasCache,cachePct:totIn>0?(cacheRead/totIn)*100:null,
+        respTok:respTok,outTok:outTok,thinkTok:thinkTok,
+        retries:retries,retryWaitSec:rWait,errs:errs,errMsg:errMsg
+      };
+    }
+    var sliceGens=(slice&&Array.isArray(slice.generatorMetadatasInSlice))?slice.generatorMetadatasInSlice:[],
+        gens=(Array.isArray(rpcGens)&&rpcGens.length>0)?rpcGens:sliceGens,
+        coveredSteps=Object.create(null),
+        calls=[];
+    for(var q=0;q<gens.length;q++){
+      var gItem=gens[q];
+      if(!gItem)continue;
+      var cm=gItem.metadata&&gItem.metadata.case==="chatModel"?gItem.metadata.value:gItem.chatModel,
+          genErr=extractErrStr(gItem.error);
+      if(!cm&&!genErr)continue;
+      var sIndices=Array.isArray(gItem.stepIndices)?gItem.stepIndices:[],
+          pr=null,tm=null,hintIdx=-1;
+      for(var si=0;si<sIndices.length;si++){
+        var idx=num(sIndices[si]);
+        coveredSteps[idx]=!0;
+        if(hintIdx<0||idx>hintIdx)hintIdx=idx;
+        var candSt=stepByIdx[idx];
+        if(candSt&&candSt.step&&candSt.step.case==="plannerResponse"){
+          pr=candSt;
+          tm=timingMap?timingMap[idx]:null;
+          break;
+        }
+        if(!pr&&candSt)pr=candSt;
+        if(!tm&&timingMap&&timingMap[idx])tm=timingMap[idx];
       }
+      var stepActive=Boolean(pr&&(pr.status===genStatus||pr.status===runStatus)),
+          hasExactUsage=Boolean(cm&&cm.usage&&(num(cm.usage.outputTokens)>0||num(cm.usage.inputTokens)>0||num(cm.usage.cacheReadTokens)>0));
+      if(stepActive&&!hasExactUsage&&!genErr){
+        isGenerating=!0;
+        continue;
+      }
+      var rec=buildCall(cm,stepActive?null:pr,tm,genErr,hintIdx);
+      if(rec)calls.push(rec);
+    }
+    var addedFallback=!1;
+    for(var p=0;p<steps.length;p++){
+      var pst=steps[p];
+      if(!pst||!pst.step)continue;
+      var pIdx=pst.metadata&&pst.metadata.sourceTrajectoryStepInfo&&pst.metadata.sourceTrajectoryStepInfo.stepIndex!==void 0
+        ?num(pst.metadata.sourceTrajectoryStepInfo.stepIndex):(sliceStart+p);
+      if(coveredSteps[pIdx])continue;
+      if(pst.step.case==="plannerResponse"&&pst.status!==genStatus&&pst.status!==runStatus){
+        var fallbackRec=buildCall(null,pst,timingMap?timingMap[pIdx]:null,"",pIdx);
+        if(fallbackRec){calls.push(fallbackRec);addedFallback=!0}
+      }else if(pst.step.case==="errorMessage"){
+        var em=extractErrStr(pst.step.value&&pst.step.value.error)||"Error";
+        calls.push({
+          stepIdx:pIdx,inTps:0,ttftSec:0,outTps:0,sSec:0,durSec:0,
+          uncachedIn:0,cacheRead:0,cacheWrite:0,totIn:0,hasCache:!1,cachePct:null,
+          respTok:0,outTok:0,thinkTok:0,retries:0,retryWaitSec:0,errs:1,errMsg:em
+        });
+        addedFallback=!0;
+      }
+    }
+    if(addedFallback&&calls.length>1){
+      calls.sort(function(a,b){return (a.stepIdx>=0&&b.stepIdx>=0)?(a.stepIdx-b.stepIdx):0});
+    }
+    var lastTurn=calls.length>0?calls[calls.length-1]:null,
+        session=null;
+    if(calls.length>0){
+      var sumUncached=0,sumCacheRead=0,sumCacheWrite=0,sumIn=0,hasAnyCache=!1,
+          sumResp=0,sumOut=0,sumThink=0,sumRetries=0,sumRetryWait=0,sumErrs=0,lastErrMsg="",
+          ttftCnt=0,sumTtft=0,pairedInTok=0,pairedTtftSec=0,
+          streamCnt=0,pairedOutTok=0,pairedStreamSec=0,
+          durCnt=0,sumDur=0;
+      for(var ci=0;ci<calls.length;ci++){
+        var c=calls[ci];
+        sumUncached+=c.uncachedIn;
+        sumCacheRead+=c.cacheRead;
+        sumCacheWrite+=c.cacheWrite;
+        sumIn+=c.totIn;
+        if(c.hasCache)hasAnyCache=!0;
+        sumResp+=c.respTok;
+        sumOut+=c.outTok;
+        sumThink+=c.thinkTok;
+        sumRetries+=c.retries;
+        sumRetryWait+=c.retryWaitSec;
+        sumErrs+=c.errs;
+        if(c.errMsg)lastErrMsg=c.errMsg;
+        if(c.ttftSec>0.01){
+          ttftCnt+=1;
+          sumTtft+=c.ttftSec;
+          if(c.totIn>0){pairedInTok+=c.totIn;pairedTtftSec+=c.ttftSec}
+        }
+        if(c.sSec>0.02&&c.outTok>0){
+          streamCnt+=1;
+          pairedOutTok+=c.outTok;
+          pairedStreamSec+=c.sSec;
+        }
+        if(c.durSec>0){
+          durCnt+=1;
+          sumDur+=c.durSec;
+        }
+      }
+      var nCalls=calls.length;
+      session={
+        count:nCalls,
+        inTps:(pairedInTok>0&&pairedTtftSec>0.01)?(pairedInTok/pairedTtftSec):0,
+        ttftSec:ttftCnt>0?(sumTtft/ttftCnt):0,
+        outTps:(pairedOutTok>0&&pairedStreamSec>0.02)?(pairedOutTok/pairedStreamSec):0,
+        durSec:durCnt>0?(sumDur/durCnt):0,totalDurSec:sumDur,
+        timedTtftCount:ttftCnt,timedStreamCount:streamCnt,timedDurCount:durCnt,
+        uncachedIn:sumUncached,cacheRead:sumCacheRead,cacheWrite:sumCacheWrite,totIn:sumIn,
+        hasCache:hasAnyCache,cachePct:sumIn>0?(sumCacheRead/sumIn)*100:null,
+        respTok:sumResp,outTok:sumOut,thinkTok:sumThink,
+        retries:sumRetries,retryWaitSec:sumRetryWait,errs:sumErrs,errMsg:lastErrMsg
+      };
     }
     return {
       used:used,max:max,frac:frac,isWarn:frac>=0.8,approx:approx,
-      sys:sys,chat:chat,free:free,groups:groups,t:telemetry
+      sys:sys,chat:chat,free:free,groups:groups,
+      generating:isGenerating,t:lastTurn,s:session
     };
   }
   function __AgyContextIndicator(props){
     var convId=props&&props.conversationId,
         agentState=${useConvStateSym}(convId,CTX_SEL),
         [open,setOpen]=${R}.useState(!1),
-        [copied,setCopied]=${R}.useState(!1),
-        [tick,setTick]=${R}.useState(0),
         [,setPrefVer]=${R}.useState(0),
+        [genVer,setGenVer]=${R}.useState(0),
         [pos,setPos]=${R}.useState(null),
         trigRef=${R}.useRef(null),
         popRef=${R}.useRef(null),
-        trackerRef=${R}.useRef({key:"",startMs:0}),
-        copyTimerRef=${R}.useRef(null);
+        mountedRef=${R}.useRef(!0);
+    var totalGenLen=num(agentState&&agentState.trajectorySlice&&agentState.trajectorySlice.totalGeneratorMetadataLength),
+        rpcEntry=convId?getRpcGenEntry(convId):null;
     var m=${R}.useMemo(function(){
-      return deriveContextMetrics(agentState,trackerRef.current,Date.now());
-    },[agentState,tick]);
-    var isStreaming=Boolean(m&&m.t&&m.t.streaming);
+      return deriveContextMetrics(agentState,rpcEntry?rpcEntry.items:null);
+    },[agentState,genVer,convId]);
     ${R}.useEffect(function(){
+      mountedRef.current=!0;
       function fn(){setPrefVer(function(v){return v+1})}
       prefSubs.push(fn);
-      return function(){var i=prefSubs.indexOf(fn);if(i>=0)prefSubs.splice(i,1)};
+      return function(){
+        mountedRef.current=!1;
+        var i=prefSubs.indexOf(fn);
+        if(i>=0)prefSubs.splice(i,1);
+      };
     },[]);
     ${R}.useEffect(function(){
-      if(!isStreaming||typeof setInterval!=="function")return;
-      var id=setInterval(function(){setTick(function(v){return v+1})},500);
-      return function(){clearInterval(id)};
-    },[isStreaming]);
+      if(!convId||!(totalGenLen>0))return;
+      var cli=typeof globalThis!=="undefined"?globalThis.__agyLsClient:null;
+      if(!cli||typeof cli.getCascadeTrajectoryGeneratorMetadata!=="function")return;
+      var ent=getRpcGenEntry(convId);
+      if(!ent||ent.fetching||ent.items.length>=totalGenLen||ent.settledLen===totalGenLen)return;
+      ent.fetching=!0;
+      (async function(){
+        try{
+          var off=ent.items.length,guard=0;
+          while(off<totalGenLen&&guard<64){
+            guard+=1;
+            var res=await cli.getCascadeTrajectoryGeneratorMetadata(${pbCreateGen}(${genMetaReqSchema},{cascadeId:convId,generatorMetadataOffset:off}));
+            var arr=(res&&Array.isArray(res.generatorMetadata))?res.generatorMetadata:[];
+            if(arr.length===0){ent.settledLen=totalGenLen;break}
+            for(var idx=0;idx<arr.length;idx++)ent.items.push(arr[idx]);
+            off=ent.items.length;
+          }
+          if(ent.items.length>=totalGenLen)ent.settledLen=totalGenLen;
+        }catch{
+          ent.settledLen=totalGenLen;
+        }finally{
+          ent.fetching=!1;
+          if(mountedRef.current)setGenVer(function(v){return v+1});
+        }
+      })();
+    },[convId,totalGenLen,genVer]);
     ${R}.useEffect(function(){
       if(!open||typeof window==="undefined"||typeof document==="undefined")return;
       function syncPos(){
         if(!trigRef.current)return;
         var r=trigRef.current.getBoundingClientRect(),
             rightPx=Math.max(8,Math.round(window.innerWidth-r.right)),
-            above=r.top>=300||r.top>=window.innerHeight-r.bottom;
+            above=r.top>=420||r.top>=window.innerHeight-r.bottom;
         setPos(above
           ?{position:"fixed",zIndex:9999,right:rightPx+"px",bottom:Math.round(window.innerHeight-r.top+8)+"px"}
           :{position:"fixed",zIndex:9999,right:rightPx+"px",top:Math.round(r.bottom+8)+"px"});
@@ -1750,32 +1923,125 @@ function buildContextIndicatorSource({
         window.removeEventListener("scroll",syncPos,!0);
       };
     },[open]);
-    ${R}.useEffect(function(){
-      return function(){if(copyTimerRef.current)clearTimeout(copyTimerRef.current)};
-    },[]);
     if(!m)return null;
-    var pinTps=readPref(PIN_KEY,!1),
+    var pinMode=readPinMode(),
         subOpen=readPref(SUB_KEY,!0),
         prefix=m.approx?"~":"",
         pctRound=Math.round(m.frac*100),
         warnCol="var(--warning, #d97706)",
+        errCol="var(--destructive, #dc2626)",
         chatCol=m.isWarn?warnCol:"color-mix(in srgb, var(--primary) 82%, var(--foreground))",
         sysCol="color-mix(in srgb, var(--foreground) 78%, transparent)",
         t=m.t,
-        hasTps=Boolean(t&&t.tps>0),
-        shortTps=hasTps?(t.tpsApprox?"~":"")+Math.round(t.tps)+" t/s":"",
-        trigLabel=pinTps&&shortTps?(prefix+pctRound+"% \\u00b7 "+shortTps):(prefix+pctRound+"%"),
-        hasGroups=m.groups.length>0;
-    function onCopyModel(){
-      if(!t||!t.rawModel)return;
-      try{
-        if(typeof navigator!=="undefined"&&navigator.clipboard&&navigator.clipboard.writeText){
-          navigator.clipboard.writeText(t.rawModel);
-        }
-      }catch{}
-      setCopied(!0);
-      if(copyTimerRef.current)clearTimeout(copyTimerRef.current);
-      copyTimerRef.current=setTimeout(function(){setCopied(!1)},1200);
+        s=m.s,
+        pinnedTps=pinMode==="turn"
+          ?((t&&t.outTps>0)?t.outTps:0)
+          :(pinMode==="avg"?((s&&s.outTps>0)?s.outTps:(t&&t.outTps>0?t.outTps:0)):0),
+        shortTps=pinnedTps>0?(pinnedTps>=1e3?((pinnedTps/1e3).toFixed(1)+"K t/s"):(Math.round(pinnedTps)+" t/s")):"",
+        trigLabel=pinMode!=="off"&&shortTps?(prefix+pctRound+"% \\u00b7 "+shortTps):(prefix+pctRound+"%"),
+        hasGroups=m.groups.length>0,
+        PIN_OPTS=[
+          ["off","Off","Hide output speed in bottom toolbar"],
+          ["turn","Turn","Show Last Turn output speed (t/s) in bottom toolbar"],
+          ["avg","Avg","Show Session average output speed (t/s) in bottom toolbar"]
+        ];
+    function renderLabel(tag,name){
+      if(!tag)return ${R}.createElement("span",{className:"text-muted-foreground"},name);
+      return ${R}.createElement("span",{className:"text-muted-foreground"},
+        ${R}.createElement("span",{style:{opacity:0.62,marginRight:"3px"}},tag),
+        name
+      );
+    }
+    function renderSection(title,subText,d,isSession){
+      if(!d)return null;
+      var avgTag=isSession?"Avg":"",
+          sumTag=isSession?"\\u03a3":"",
+          cacheTip=d.totIn>0
+            ?("Prefix cache: "+fmtExact(d.cacheRead)+" hit / "+fmtExact(d.totIn)+" total input tokens ("+fmtExact(d.uncachedIn)+" new"+(d.cacheWrite>0?", "+fmtExact(d.cacheWrite)+" written":"")+")")
+            :void 0,
+          inTip=d.totIn>0
+            ?(fmtExact(d.totIn)+" total input tokens ("+fmtExact(d.cacheRead)+" cached + "+fmtExact(d.uncachedIn+d.cacheWrite)+" uncached)")
+            :void 0,
+          respTip=(d.outTok>0||d.respTok>0)
+            ?(fmtExact(d.respTok)+" response tokens"+(d.thinkTok>0?" (excl. "+fmtExact(d.thinkTok)+" thinking)":""))
+            :void 0,
+          outTip=d.outTok>0
+            ?(fmtExact(d.outTok)+" total output tokens ("+fmtExact(d.respTok)+" response + "+fmtExact(d.thinkTok)+" thinking)")
+            :void 0,
+          inSpdTip=d.inTps>0
+            ?(fmtExact(d.inTps)+" input tokens/s"+(isSession&&d.timedTtftCount<d.count?" (across "+d.timedTtftCount+" timed calls)":""))
+            :void 0,
+          outSpdTip=d.outTps>0
+            ?(d.outTps.toFixed(1)+" output tokens/s"+(isSession&&d.timedStreamCount<d.count?" (across "+d.timedStreamCount+" timed calls)":""))
+            :void 0,
+          ttftTip=isSession&&d.timedTtftCount>0&&d.timedTtftCount<d.count
+            ?("Average across "+d.timedTtftCount+" / "+d.count+" timed calls")
+            :void 0,
+          durTip=isSession&&d.totalDurSec>0
+            ?("Total observed: "+fmtDur(d.totalDurSec,!1)+(d.timedDurCount<d.count?" (across "+d.timedDurCount+" / "+d.count+" timed calls)":" (across "+d.timedDurCount+" calls)"))
+            :void 0;
+      return ${R}.createElement("div",{
+        className:"flex flex-col border-border",
+        style:{marginTop:"9px",paddingTop:"8px",gap:"5px",borderTopWidth:"1px",borderTopStyle:"solid"}
+      },
+        ${R}.createElement("div",{className:"flex items-center justify-between",style:{gap:"6px"}},
+          ${R}.createElement("div",{className:"flex items-center",style:{gap:"6px",minWidth:0}},
+            ${R}.createElement("span",{className:"text-muted-foreground font-medium shrink-0"},title),
+            subText&&${R}.createElement("span",{className:"text-muted-foreground truncate",style:{opacity:0.68}},subText)
+          ),
+          (d.errs>0||d.retries>0)&&${R}.createElement("div",{className:"flex items-center shrink-0",style:{gap:"4px"}},
+            d.errs>0&&${R}.createElement("span",{
+              className:"rounded text-xs font-medium tabular-nums shrink-0",
+              title:d.errMsg||(d.errs+" failed generation(s)"),
+              style:{padding:"1px 6px",color:errCol,background:"color-mix(in srgb, "+errCol+" 14%, transparent)"}
+            },"! "+d.errs+(d.errs===1?" error":" errors")),
+            d.retries>0&&${R}.createElement("span",{
+              className:"rounded text-xs font-medium tabular-nums shrink-0",
+              title:d.retryWaitSec>0
+                ?("Backend auto-retried "+d.retries+" time(s), waited "+fmtDur(d.retryWaitSec,!1))
+                :("Backend auto-retried "+d.retries+" time(s)"),
+              style:{padding:"1px 6px",color:warnCol,background:"color-mix(in srgb, "+warnCol+" 14%, transparent)"}
+            },"\\u21bb "+d.retries+(d.retries===1?" retry":" retries"))
+          )
+        ),
+        ${R}.createElement("div",{
+          className:"text-xs tabular-nums",
+          style:{display:"grid",gridTemplateColumns:"1fr 1fr",columnGap:"14px",rowGap:"3px"}
+        },
+          ${R}.createElement("div",{className:"flex items-center justify-between",title:inTip},
+            renderLabel(sumTag,"Input"),
+            ${R}.createElement("span",{className:"text-foreground"},d.totIn>0?fmtK(d.totIn):"\\u2014")
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",title:outTip},
+            renderLabel(sumTag,"Output"),
+            ${R}.createElement("span",{className:"text-foreground"},d.outTok>0?fmtK(d.outTok):"\\u2014")
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",title:cacheTip},
+            renderLabel(sumTag,"Cache hit"),
+            ${R}.createElement("span",{className:"text-foreground"},d.hasCache?fmtCachePct(d.cacheRead,d.totIn):"\\u2014")
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",title:respTip},
+            renderLabel(sumTag,"Response"),
+            ${R}.createElement("span",{className:"text-foreground"},(d.outTok>0||d.respTok>0)?fmtK(d.respTok):"\\u2014")
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",title:inSpdTip},
+            renderLabel(avgTag,"In speed"),
+            ${R}.createElement("span",{className:"text-foreground"},fmtTps(d.inTps))
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",title:outSpdTip},
+            renderLabel(avgTag,"Out speed"),
+            ${R}.createElement("span",{className:"font-medium text-foreground"},fmtTps(d.outTps))
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",title:ttftTip},
+            renderLabel(avgTag,"TTFT"),
+            ${R}.createElement("span",{className:"text-foreground"},fmtDur(d.ttftSec,!1))
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",title:durTip},
+            renderLabel(avgTag,"Duration"),
+            ${R}.createElement("span",{className:"text-foreground"},fmtDur(d.durSec,!1))
+          )
+        )
+      );
     }
     var popoverEl=open&&pos&&typeof document!=="undefined"&&document.body?${portalNs}.createPortal(
       ${R}.createElement("div",{
@@ -1783,7 +2049,7 @@ function buildContextIndicatorSource({
         role:"dialog",
         "aria-label":"Context window usage and inference telemetry",
         className:"bg-card border border-border rounded-lg shadow-lg text-xs text-foreground select-none",
-        style:Object.assign({},pos,{width:"22.5rem",maxWidth:"calc(100vw - 16px)",padding:"12px"})
+        style:Object.assign({},pos,{width:"23.5rem",maxWidth:"calc(100vw - 16px)",maxHeight:"calc(100vh - 56px)",overflowY:"auto",padding:"12px"})
       },
         ${R}.createElement("div",{className:"flex items-center justify-between",style:{gap:"8px",marginBottom:"6px"}},
           ${R}.createElement("div",{className:"flex items-center",style:{gap:"6px"}},
@@ -1794,14 +2060,27 @@ function buildContextIndicatorSource({
               style:{padding:"1px 6px"}
             },"~ Approx")
           ),
-          ${R}.createElement("div",{className:"flex items-center",style:{gap:"8px"}},
-            ${R}.createElement("button",{
-              type:"button",
-              onClick:function(){writePref(PIN_KEY,!pinTps)},
-              title:"Pin output speed (t/s) next to percentage in the bottom toolbar",
-              className:"rounded border text-xs cursor-pointer "+(pinTps?"bg-secondary border-border text-foreground font-medium":"text-muted-foreground"),
-              style:{padding:"1px 6px",borderColor:pinTps?void 0:"transparent"}
-            },pinTps?"Pin t/s: ON":"Pin t/s"),
+          ${R}.createElement("div",{className:"flex items-center shrink-0",style:{gap:"8px"}},
+            ${R}.createElement("div",{className:"flex items-center",style:{gap:"4px"}},
+              ${R}.createElement("span",{className:"text-xs text-muted-foreground"},"t/s"),
+              ${R}.createElement("div",{
+                role:"group",
+                "aria-label":"Bottom toolbar output speed mode",
+                className:"flex items-center bg-secondary border border-border rounded-md",
+                style:{padding:"1px",gap:"1px"}
+              },PIN_OPTS.map(function(opt){
+                var act=pinMode===opt[0];
+                return ${R}.createElement("button",{
+                  key:opt[0],
+                  type:"button",
+                  "aria-pressed":act,
+                  title:opt[2],
+                  onClick:function(){if(!act)writePref(PIN_KEY,opt[0])},
+                  className:"rounded text-xs cursor-pointer transition-colors "+(act?"bg-card text-foreground font-medium":"text-muted-foreground hover:text-foreground"),
+                  style:{padding:"1px 5px",lineHeight:"14px",boxShadow:act?"0 1px 2px rgba(0,0,0,0.18)":void 0}
+                },opt[1]);
+              }))
+            ),
             ${R}.createElement("span",{
               className:"font-semibold tabular-nums",
               style:{color:m.isWarn?warnCol:"var(--foreground)"}
@@ -1828,7 +2107,7 @@ function buildContextIndicatorSource({
             ${R}.createElement("button",{
               type:"button",
               onClick:function(){if(hasGroups)writePref(SUB_KEY,!subOpen)},
-              className:"flex items-center justify-between text-foreground "+(hasGroups?"cursor-pointer":"") ,
+              className:"flex items-center justify-between text-foreground "+(hasGroups?"cursor-pointer":""),
               style:{width:"100%",padding:"2px 0",background:"transparent"}
             },
               ${R}.createElement("span",{className:"flex items-center",style:{gap:"6px"}},
@@ -1867,70 +2146,8 @@ function buildContextIndicatorSource({
             ${R}.createElement("span",{className:"tabular-nums text-muted-foreground"},fmtK(m.free)+" \\u00b7 "+fmtPct(m.free,m.max))
           )
         ),
-        t&&${R}.createElement("div",{
-          className:"flex flex-col border-border",
-          style:{marginTop:"10px",paddingTop:"8px",gap:"6px",borderTopWidth:"1px",borderTopStyle:"solid"}
-        },
-          ${R}.createElement("div",{className:"flex items-center justify-between",style:{gap:"6px"}},
-            ${R}.createElement("div",{className:"flex items-center",style:{gap:"6px",minWidth:0}},
-              ${R}.createElement("span",{className:"text-muted-foreground font-medium shrink-0"},t.streaming?"Generating":"Last Turn"),
-              t.retries>0&&${R}.createElement("span",{
-                className:"rounded text-xs font-medium tabular-nums shrink-0",
-                title:t.retryWaitSec>0
-                  ?("Backend auto-retried "+t.retries+" time(s), waited "+fmtSec(t.retryWaitSec,!1))
-                  :("Backend auto-retried "+t.retries+" time(s)"),
-                style:{padding:"1px 6px",color:warnCol,background:"color-mix(in srgb, "+warnCol+" 14%, transparent)"}
-              },"\\u21bb "+t.retries+(t.retries===1?" retry":" retries"))
-            ),
-            t.model&&${R}.createElement("button",{
-              type:"button",
-              onClick:onCopyModel,
-              title:(t.rawModel||t.model)+" (click to copy)",
-              className:"bg-secondary border border-border rounded font-mono text-xs text-foreground truncate cursor-pointer",
-              style:{padding:"1px 6px",maxWidth:"12.5rem"}
-            },copied?"Copied!":t.model)
-          ),
-          ${R}.createElement("div",{
-            className:"text-xs tabular-nums",
-            style:{display:"grid",gridTemplateColumns:"1fr 1fr",columnGap:"14px",rowGap:"4px"}
-          },
-            ${R}.createElement("div",{className:"flex items-center justify-between"},
-              ${R}.createElement("span",{className:"text-muted-foreground"},"Speed"),
-              ${R}.createElement("span",{className:"font-medium text-foreground"},t.tps>0?((t.tpsApprox?"~":"")+t.tps.toFixed(1)+" tok/s"):"\\u2014")
-            ),
-            ${R}.createElement("div",{className:"flex items-center justify-between"},
-              ${R}.createElement("span",{className:"text-muted-foreground"},"TTFT"),
-              ${R}.createElement("span",{className:"text-foreground"},fmtSec(t.ttftSec,!1))
-            ),
-            ${R}.createElement("div",{
-              className:"flex items-center justify-between",
-              title:t.inTok>0?(fmtExact(t.cacheRead)+" / "+fmtExact(t.inTok)+" input tokens cached"):void 0
-            },
-              ${R}.createElement("span",{className:"text-muted-foreground"},"Cache hit"),
-              ${R}.createElement("span",{className:"text-foreground"},t.cachePct!==null?(Math.round(t.cachePct)+"%"):"\\u2014")
-            ),
-            ${R}.createElement("div",{className:"flex items-center justify-between"},
-              ${R}.createElement("span",{className:"text-muted-foreground"},"Duration"),
-              ${R}.createElement("span",{className:"text-foreground"},fmtSec(t.durSec,t.streaming))
-            ),
-            ${R}.createElement("div",{
-              className:"flex items-center justify-between",
-              title:t.outTok>0?(fmtExact(t.outTok)+" output tokens"):void 0
-            },
-              ${R}.createElement("span",{className:"text-muted-foreground"},"Output"),
-              ${R}.createElement("span",{className:"text-foreground"},t.outTok>0?((t.tpsApprox?"~":"")+fmtK(t.outTok)):"\\u2014")
-            ),
-            ${R}.createElement("div",{
-              className:"flex items-center justify-between",
-              title:t.thinkTok>0
-                ?(fmtExact(t.thinkTok)+" thinking tokens"+(t.thinkDurSec>0?" ("+fmtSec(t.thinkDurSec,!1)+")":""))
-                :void 0
-            },
-              ${R}.createElement("span",{className:"text-muted-foreground"},"Thinking"),
-              ${R}.createElement("span",{className:"text-foreground"},t.thinkTok>0?((t.tpsApprox?"~":"")+fmtK(t.thinkTok)):"\\u2014")
-            )
-          )
-        )
+        renderSection("Last Turn",m.generating?"\\u00b7 Generating\\u2026":"",t,!1),
+        renderSection(s?("\\u03a3 Session \\u00b7 "+s.count+(s.count===1?" turn":" turns")):"",null,s,!0)
       ),
       document.body
     ):null;
@@ -1943,19 +2160,15 @@ function buildContextIndicatorSource({
         "aria-expanded":open,
         "aria-label":"Context window usage: "+trigLabel,
         onClick:function(){setOpen(function(v){return !v})},
-        className:"flex items-center rounded-md border cursor-pointer shrink-0 select-none "+(open?"bg-card border-border":""),
+        className:"flex items-center h-7 pl-1.5 pr-2 rounded-full text-sm cursor-pointer shrink-0 select-none outline-none whitespace-nowrap hover:bg-secondary transition-colors "+(open?"bg-secondary text-foreground":"text-secondary-foreground"),
         style:{
           gap:"5px",
-          padding:"2px 6px",
-          height:"24px",
-          color:m.isWarn?warnCol:"var(--muted-foreground)",
-          borderColor:open?void 0:"transparent",
-          backgroundColor:open?void 0:"transparent"
+          color:m.isWarn?warnCol:void 0
         }
       },
         ${R}.createElement("svg",{
-          width:14,height:14,viewBox:"0 0 16 16",
-          className:"shrink-0",
+          width:16,height:16,viewBox:"0 0 16 16",
+          className:"w-4 h-4 shrink-0",
           style:{transform:"rotate(-90deg)"}
         },
           ${R}.createElement("circle",{
@@ -1969,7 +2182,7 @@ function buildContextIndicatorSource({
             strokeLinecap:"round"
           })
         ),
-        ${R}.createElement("span",{className:"text-xs font-medium tabular-nums"},trigLabel)
+        ${R}.createElement("span",{className:"tabular-nums"},trigLabel)
       ),
       popoverEl
     );
@@ -1980,8 +2193,10 @@ function buildContextIndicatorSource({
 
 /**
  * Patch 5 (`buildBindings.contextUsageIndicator` in 2.30+): Mounts an original,
- * clean-room Context Window & Last-Turn Inference Telemetry indicator into the
- * `buildBindings` entry slot.
+ * clean-room Context Window, Last-Turn, and Session Inference Telemetry
+ * indicator into the `buildBindings` entry slot, and expands the lightweight
+ * `generatorMetadatas` subscription slice from `{startIndex:-1}` to `{startIndex:0}`
+ * so cumulative session token & cache-hit metrics cover the entire conversation.
  *
  * Modes (`indicatorMode`):
  *   - `'custom'` (default): mounts `__AgyContextIndicator` both when upstream
@@ -2028,6 +2243,7 @@ export const PATCH_CONTEXT_INDICATOR = {
     }
 
     let symbols;
+    let genSliceEdit = null;
     try {
       const [, useConvStateSym] = matchUnique(
         js,
@@ -2039,11 +2255,6 @@ export const PATCH_CONTEXT_INDICATOR = {
         /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.TokenType=\{UNSPECIFIED:0,SYSTEM_PROMPT:1,/g,
         'PATCH_CONTEXT_INDICATOR:TokenType'
       );
-      const commonNs = resolveUniqueIdentifier(
-        js,
-        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.ExperimentWithVariantSchema\b/g,
-        'PATCH_CONTEXT_INDICATOR:CommonPb'
-      );
       const reactIdent = resolveUniqueIdentifier(
         js,
         /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.createElement\([A-Za-z0-9_$]+,\{conversationId:[A-Za-z0-9_$]+\}\)/g,
@@ -2054,7 +2265,28 @@ export const PATCH_CONTEXT_INDICATOR = {
         /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.createPortal\(/g,
         'PATCH_CONTEXT_INDICATOR:ReactDOM'
       );
-      symbols = { reactIdent, portalNs, useConvStateSym, cortexNs, commonNs };
+      const [, pbCreateGen, genMetaReqSchema] = matchUnique(
+        js,
+        /\.getCascadeTrajectoryGeneratorMetadata\(([A-Za-z0-9_$]+)\(([A-Za-z0-9_$]+),\{cascadeId:/,
+        'PATCH_CONTEXT_INDICATOR:GetGeneratorMetadataRpc'
+      );
+      const alreadyFullGenSlice =
+        /(?<![A-Za-z0-9_$])[A-Za-z0-9_$]+=\{startIndex:-\d+\},[A-Za-z0-9_$]+=\{startIndex:0\},[A-Za-z0-9_$]+=\{startIndex:0,endIndexExclusive:0\}/.test(
+          js
+        );
+      if (!alreadyFullGenSlice) {
+        const gm = matchUnique(
+          js,
+          /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+=\{startIndex:-\d+\},[A-Za-z0-9_$]+=\{startIndex:)-1(\},[A-Za-z0-9_$]+=\{startIndex:0,endIndexExclusive:0\})/,
+          'PATCH_CONTEXT_INDICATOR:GeneratorMetadatasSlice'
+        );
+        genSliceEdit = {
+          start: gm.index,
+          end: gm.index + gm[0].length,
+          text: gm[1] + '0' + gm[2],
+        };
+      }
+      symbols = { reactIdent, portalNs, useConvStateSym, cortexNs, pbCreateGen, genMetaReqSchema };
     } catch (exc) {
       if (!isStripped && indicatorMode === 'custom') {
         process.stderr.write(
@@ -2067,7 +2299,13 @@ export const PATCH_CONTEXT_INDICATOR = {
     }
 
     const injected = buildContextIndicatorSource(symbols);
-    const code = js.slice(0, valueStart) + injected + js.slice(valueEnd);
+    const edits = [{ start: valueStart, end: valueEnd, text: injected }];
+    if (genSliceEdit) edits.push(genSliceEdit);
+    edits.sort((a, b) => b.start - a.start);
+    let code = js;
+    for (const ed of edits) {
+      code = code.slice(0, ed.start) + ed.text + code.slice(ed.end);
+    }
     return { code, mode: isStripped ? 'enhanced' : 'enhanced-override' };
   },
 };

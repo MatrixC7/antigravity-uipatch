@@ -32,7 +32,7 @@
 
 > [!TIP]
 > **洁净室原创恢复与增强：`enable-context-usage-indicator`（`Context & Inference Indicator`）**
-> 在 `antigravity 2.30+ / 2.31.0-1` 外部发行版（`appType: "external"`）中，Google 将 `buildBindings.contextUsageIndicator`（连同 `codeSearch`、`enhancedFileViewer`）置为了 `void 0` 并剔除了原版实现。本工具通过第 5 处结构化补丁向该插槽挂载了 **100% 原创实现的增强指示器 `__AgyContextIndicator`**，同时默认开启 `enable-context-usage-indicator` 并自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 开关（支持查看 `TokenType` 细分占比、后端实际响应模型名、输出速率 `TPS` 与 `Pin t/s` 底栏常驻开关、`TTFT`、`Cache hit`、`Duration`、`Output` / `Thinking` Token 及静默重试角标）。其余两项（`enable-code-search-palette` 与 `enable-enhanced-file-viewer`）仍为空壳，开启不生效。
+> 在 `antigravity 2.30+ / 2.31.0-1` 外部发行版（`appType: "external"`）中，Google 将 `buildBindings.contextUsageIndicator`（连同 `codeSearch`、`enhancedFileViewer`）置为了 `void 0` 并剔除了原版实现。本工具通过第 5 处结构化补丁向该插槽挂载了 **100% 原创实现的增强指示器 `__AgyContextIndicator`**，同时默认开启 `enable-context-usage-indicator` 并自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 开关（支持查看 `TokenType` 细分占比，以及 `Last Turn` 与全会话 `Σ Session · N turns` 两组 `4×2` 指标：`Input` / `Output`、`Cache hit` / `Response`、`In speed` / `Out speed` 与 `t/s [Off | Turn | Avg]` 底栏常驻开关、`TTFT` / `Duration` 及报错重试角标）。其余两项（`enable-code-search-palette` 与 `enable-enhanced-file-viewer`）仍为空壳，开启不生效。
 
 #### 值得手动添加尝鲜的加分项（Google 原生账号与本工具基线默认均关闭）
 - **`enable-bottom-terminal-panel`**：允许将内置终端停靠在底部面板（配合形态 A 使用）
@@ -125,7 +125,7 @@
 | **`enable-conversation-selection-quoting`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | *(inline)* | **保持开启**：选中模型回复片段一键引用追问 |
 | **`enable-user-message-bubbles`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | *(inline)* | **保持开启**：用户消息气泡化展示（若偏好纯扁平文档流可手动关闭） |
 | `enable-context-menu-system` | ✅ **开启** | 🟢 **默认开启（原生基线）** | `contextMenuSystem` | **保持开启**：应用级统一深色自定义右键菜单 |
-| **`enable-context-usage-indicator`** | ❌ 关闭 | 🟢 **默认开启（解锁项）** | `contextUsageIndicator` | **默认已挂载洁净室增强版 `__AgyContextIndicator`**：恢复 `Appearance -> Chat Layout` 开关，展示上下文 `TokenType` 细分、后端真实模型 ID、`TPS`（支持 `Pin t/s`）、`TTFT`、`Cache hit`、`Duration`、`Output` / `Thinking` 与重试角标 |
+| **`enable-context-usage-indicator`** | ❌ 关闭 | 🟢 **默认开启（解锁项）** | `contextUsageIndicator` | **默认已挂载洁净室增强版 `__AgyContextIndicator`**：恢复 `Appearance -> Chat Layout` 开关，展示上下文 `TokenType` 细分及 `Last Turn` / `Σ Session · N turns` 双 `4×2` 遥测（`Input`/`Output`/`Cache hit`/`Response`/`In speed`/`Out speed`/`t/s [Off\|Turn\|Avg]`/`TTFT`/`Duration` 与报错重试角标） |
 | `enable-conversation-groups` | ❌ 关闭 | ⚪ 默认关闭 | `conversationGroups` | **按需尝鲜**：左侧边栏会话自定义分组整理 |
 | `enable-conversation-forking` | ❌ 关闭 | ⚪ 默认关闭 | *(inline)* | **推荐按需开启**：允许将当前会话分支派生（Fork）为新会话 |
 | `enable-fork-at-historical-step` | ❌ 关闭 | ⚪ 默认关闭 | *(inline)* | **推荐按需开启**：支持从任意历史步骤节点处分叉新会话（配合上一项） |

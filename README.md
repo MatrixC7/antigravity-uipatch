@@ -13,8 +13,8 @@
 - **许可证**：[MIT License](LICENSE)
 
 > [!TIP]
-> **洁净室原创恢复与增强：`2.30+` 上下文容量与实时推理遥测指示器（`Context & Inference Indicator`）**
-> 在 `antigravity 2.30+ / 2.31` 外部发行包（`appType: "external"`）中，Google 将入口插槽 `buildBindings.contextUsageIndicator` 置为了 `void 0` 并剔除了原版组件代码。本工具在不拷贝任何 `2.29` 闭源字节的前提下，向该预留插槽挂载了 **100% 原创实现的增强指示器 `__AgyContextIndicator`**（同时自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 开关）：除展示总上下文占用圆环、压缩后近似标记（`~`）及可折叠的 `Instructions & tools` 细分项（`System` / `Tools` / `MCP` / `Rules & Skills`）外，还直接读取会话流中的 `ChatModelMetadata` 展示**后端实际返回模型 ID**（一键复制）、**流式生成速率 `TPS`**（支持 `Pin t/s` 常驻底栏）、**首字延迟 `TTFT`**、**KV 缓存命中率 `Cache hit`**、**单轮耗时 `Duration`**、**`Output` / `Thinking` Token 拆分**以及后台静默重试异常角标（`↻ retry`）。
+> **洁净室原创恢复与增强：`2.30+` 上下文容量与双层推理遥测指示器（`Context & Inference Indicator`）**
+> 在 `antigravity 2.30+ / 2.31` 外部发行包（`appType: "external"`）中，Google 将入口插槽 `buildBindings.contextUsageIndicator` 置为了 `void 0` 并剔除了原版组件代码。本工具在不拷贝任何 `2.29` 闭源字节的前提下，向该预留插槽挂载了 **100% 原创实现的增强指示器 `__AgyContextIndicator`**（同时自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 开关）：除展示总上下文占用圆环、压缩后近似标记（`~`）及可折叠的 `Instructions & tools` 细分项（`System` / `Tools` / `MCP` / `Rules & Skills`）外，还通过轻量统计增量通道在每轮完成后原子刷新 **`Last Turn`（最近完成轮次）** 与 **`Σ Session · N turns`（全会话累积 `Σ` / 均值 `Avg`）** 两组左入右出 `4×2` 正交遥测矩阵——左列输入侧展示 **`Input` / `Cache hit` / `In speed` / `TTFT`**，右列输出侧展示 **`Output` / `Response` / `Out speed`（支持通过 `t/s [Off | Turn | Avg]` 三段开关按需将单轮或全会话均值常驻底栏） / `Duration`**，并汇总当轮与全会话的异常报错/静默重试角标（`! error` / `↻ retry`）。各项读数含义与实机现象解惑详见 [《原理与使用指南》第 2 节](docs/overview-and-guide.md#2-上下文容量与推理遥测面板context--inference-indicator读数指南与设计解惑)。
 
 ---
 
@@ -45,12 +45,12 @@
    采用尾部追加式无损重打包，仅在 `dist/languageServer.js` 末尾新增 **5 行**（2 行注释 + 3 行条件代码），原厂其余 `1,111` 个文件条目及前序第三方归档条目的偏移与字节均保持零变动。只有当进程环境中存在 `AGY_UI_BUNDLE` 时才向 `language_server` 追加 `--web_bundle_path`；未设置该变量时，启动行为与原厂构建 100% 一致。
 
 2. **外置前端补丁（`~/.local/share/antigravity-uipatch/` → `main.js` 五处结构化汇聚点）**
-   从 `language_server` 内嵌归档只读提取全部 `548` 个条目（`540` 个文件 + `8` 个目录，其余 `539` 个文件原样保留），按唯一语法结构动态解析 Closure Compiler 压缩符号名，对核心包 `main.js`（`11,871,831` → `11,908,541` B）施加 **5 处唯一锚点补丁**并通过 V8 语法解析校验：
+   从 `language_server` 内嵌归档只读提取全部 `548` 个条目（`540` 个文件 + `8` 个目录，其余 `539` 个文件原样保留），按唯一语法结构动态解析 Closure Compiler 压缩符号名，对核心包 `main.js`（`11,871,831` → `11,917,108` B）施加 **5 处唯一锚点补丁**并通过 V8 语法解析校验：
    - **主 Mendel 拉取入口（`Ola()`：原生基线 + 启动预热）**：启动早期从 `~/.config/Antigravity/app_storage.json` 预热手动覆盖表；通过共享策略 `__agyResolveExperiments()` 区分三种响应——服务端返回非空表时原样保留并开启 `FLAGS`（`enable-developer-mode` 与 `enable-context-usage-indicator`）；服务端成功返回空表时清空旧缓存，启用实测 Google 原生基线（**41 项布尔开关 + 7 项参数配置**）与 `FLAGS`；请求抛错时保留上一次成功的实时表（last-known-good）。
    - **次级 Mendel 包装器（`Qt().getMendelFlags`：双通道统一归一化）**：捕获次级通道（`IT` / `JT`）的 RPC 异常，与主通道共用同一套 `__agyResolveExperiments()` + `__agyNormalizeMendel()` 解析与归一化逻辑。
    - **全通道本地覆盖桥接（`Hi` / `Ii` / `IT` / `flagOverrideSync` / `hhd()`）**：绑定 `clientStorageFeature`（`storageService` → `app_storage.json`）与 `flagOverrideSync`，使全部直读与次级布尔通道实时响应双向覆盖，首次启动未配置外观开关时默认初始化 `contextUsageIndicatorEnabled = "true"`（用户手动关闭为 `"false"` 后永久尊重用户选择），并在 `provider.dispose()` 时自动注销监听器。
    - **可滚动开关选择器（`EGb()`）**：自动提取宿主压缩后的 React 与按钮组件符号，将不可滚动、脱离深色主题的原生 `<datalist>` 替换为深色主题适配、向上展开（`bottom-full mb-1`）、支持鼠标滚轮与键盘导航及 ARIA `listbox` 语义的受控下拉框。
-   - **增强型上下文容量与推理遥测指示器（`buildBindings.contextUsageIndicator` → `__AgyContextIndicator`）**：向 `2.30+` 外部包预留的 `contextUsageIndicator` 插槽挂载原创 Portal 浮层组件（支持 `--indicator-mode=custom|polyfill|stock`，默认 `custom`），实时展示上下文窗口 `TokenType` 细分占比、后端真实响应模型名、输出速率 `TPS`（可一键 `Pin t/s` 常驻底栏）、`TTFT`、`Cache hit`、`Duration`、`Output` / `Thinking` Token 及静默重试角标。
+   - **增强型上下文容量与推理遥测指示器（`buildBindings.contextUsageIndicator` → `__AgyContextIndicator`）**：向 `2.30+` 外部包预留的 `contextUsageIndicator` 插槽挂载原创 Portal 浮层组件（支持 `--indicator-mode=custom|polyfill|stock`，默认 `custom`；底栏按钮与官方 `h-7` 胶囊 1:1 视觉对齐），在保持聊天正文最近 50 步懒加载不变的前提下按偏移增量拉取百字节级生成统计，完整展示上下文窗口 `TokenType` 细分占比，以及 `Last Turn` 与 `Σ Session · N turns`（`Σ` / `Avg`）两组 `4×2` 推理指标（`Input` / `Output`、`Cache hit` / `Response`、`In speed` / `Out speed` 与 `t/s [Off | Turn | Avg]` 底栏常驻切换、`TTFT` / `Duration`）及当轮与全会话报错/重试角标。
 
 3. **桌面启动器开关（`~/.local/share/applications/antigravity.desktop`）**
    基于统一解析器 `analyseDesktopExec()` 与双层编码（`Exec` argv 层 → `GKeyFile` 字符串层），在保留既有 `env` 选项与其他环境变量的前提下注入 `AGY_UI_BUNDLE=<ui-dir>` 并刷新桌面缓存（`ksycoca6` / `update-desktop-database`）。从系统应用菜单启动时自动挂载外置 UI；执行 `disable` 移除该变量即可零成本切回原厂内置 UI。
@@ -77,7 +77,7 @@
 git clone https://github.com/MatrixC7/antigravity-uipatch.git ~/antigravity-uipatch
 cd ~/antigravity-uipatch
 
-# 1. 纯只读自检：校验 ASAR 零改动字节往返、内嵌 ZIP main.js CRC32、四处补丁唯一锚点与 V8 语法解析
+# 1. 纯只读自检：校验 ASAR 零改动字节往返、内嵌 ZIP main.js CRC32、五处补丁唯一锚点与 V8 语法解析
 node antigravity_uipatch.mjs self-test
 
 # 2. 安装补丁（若 app.asar 归属 root，使用：sudo node antigravity_uipatch.mjs install --user "$USER"）
@@ -150,7 +150,7 @@ node antigravity_uipatch.mjs verify
 ### 1. 静态状态、版本对齐与配对备份校验（纯离线只读）
 
 ```bash
-# 只读自检（ASAR 零改动往返哈希、内嵌 ZIP main.js CRC32、四处锚点唯一性、V8 语法解析）
+# 只读自检（ASAR 零改动往返哈希、内嵌 ZIP main.js CRC32、五处锚点唯一性、V8 语法解析）
 node antigravity_uipatch.mjs self-test
 
 # 查看当前安装状态、启动器四态（ON/OFF/UNKNOWN/INVALID）、构建 CL 对齐、备份配对及运行中进程状态
@@ -180,7 +180,7 @@ node verify_live.mjs
 
 ### 4. 离线单元测试套件
 
-包含 **44 项自动化测试**（`43` 项核心单元与回归测试 + `1` 项扫描工具测试：涵盖合成与真实 `app.asar` 逐字节往返一致性、单条目替换隔离性、ASAR `link` 节点容错、备份配对判定与坏备份拒绝、STORE/DEFLATE ZIP 解压与单比特 CRC32 损坏拦截、EOCD 诱饵与中央目录边界校验、路径穿越与规范化名冲突拦截、双 ZIP 时区归档排除、全部 5 处结构化前端补丁与 V8 语法校验、Closure 压缩符号含 `$` 前缀重命名自适应测试、结构扫描器 fail-closed 断言、VM 沙盒验证 Google 原生基线与双向覆盖语义、主/次双通道共享成功空表清缓存与错误保留 last-known-good、`clientStorageFeature` + `nativeStorage` 跨随机端口持久化与 hydrate 失败重试、上下文指示器 `TokenType` 细分 / 压缩后近似 / `BigInt` 精确与流式实时 `TPS` / `TTFT` / `Cache hit` / 重试角标与 `Pin t/s` 持久化及三模式策略、解耦 RPC 队列的本地即时通知与 `dispose` 注销、UI 提交状态机双失败保护、`resolveWriteRoot` 与符号链接隔离策略，以及 `.desktop` 双层编码幂等重写、`env` 选项顺序、程序后诱饵参数保留与启动器四态解析）：
+包含 **44 项自动化测试**（`43` 项核心单元与回归测试 + `1` 项扫描工具测试：涵盖合成与真实 `app.asar` 逐字节往返一致性、单条目替换隔离性、ASAR `link` 节点容错、备份配对判定与坏备份拒绝、STORE/DEFLATE ZIP 解压与单比特 CRC32 损坏拦截、EOCD 诱饵与中央目录边界校验、路径穿越与规范化名冲突拦截、双 ZIP 时区归档排除、全部 5 处结构化前端补丁与 V8 语法校验、Closure 压缩符号含 `$` 前缀重命名自适应测试、结构扫描器 fail-closed 断言、VM 沙盒验证 Google 原生基线与双向覆盖语义、主/次双通道共享成功空表清缓存与错误保留 last-known-good、`clientStorageFeature` + `nativeStorage` 跨随机端口持久化与 hydrate 失败重试、上下文指示器 `TokenType` 细分 / 压缩后近似 / `Last Turn` 与 `Σ Session · N turns` 双 `4×2` 正交指标 / 真实缓存总输入分母 / `PROD_UI` 步骤 `createdAt` 时间戳回退 / 流式期间快照稳定 / 原生 `h-7` 胶囊尺寸与 `t/s [Off | Turn | Avg]` 三段式底栏切换持久化及三模式自适应策略、解耦 RPC 队列的本地即时通知与 `dispose` 注销、UI 提交状态机双失败保护、`resolveWriteRoot` 与符号链接隔离策略，以及 `.desktop` 双层编码幂等重写、`env` 选项顺序、程序后诱饵参数保留与启动器四态解析）：
 
 ```bash
 node --test tests/
@@ -194,9 +194,9 @@ node --test tests/
 
 ### 通俗导读与补丁实现原理
 - **[《原理与使用指南（通俗导读）》（`docs/overview-and-guide.md`）](docs/overview-and-guide.md)**
-  面向所有读者：解释 Antigravity 三层架构、企业网关与原生账号各自隐藏按钮的原因、为什么对齐 Google 原生基线并配合 `app_storage.json` 跨端口持久化最稳妥、以及 KDE `ksycoca6` 缓存等日常注意事项。
+  面向所有读者：解释 Antigravity 三层架构、企业网关与原生账号各自隐藏按钮的原因、`Context & Inference Indicator` 双层 `4×2` 面板读数指南与常见实机现象解惑（快照刷新、Prefix KV 缓存分母、`TTFT` 与上下文长度关系、工具调用整包突发 `Out speed`、双列表懒加载内存机制）、以及 KDE `ksycoca6` 缓存等日常注意事项。
 - **[《补丁架构与脚本实现详解》（`docs/patch-internals.md`）](docs/patch-internals.md)**
-  面向开发者与系统管理员：深入解析尾部追加式无损 ASAR 打包器、双内嵌 ZIP 识别与 CRC32 校验器、`main.js` 四处结构化汇聚点补丁（动态符号捕获与 `clientStorageFeature` 桥接）、统一桌面启动器解析器 `analyseDesktopExec()`、原子切换状态机以及 Pacman Hook 的 Root 信任边界审计。
+  面向开发者与系统管理员：深入解析尾部追加式无损 ASAR 打包器、双内嵌 ZIP 识别与 CRC32 校验器、`main.js` 五处结构化汇聚点补丁（动态符号捕获、`clientStorageFeature` 桥接与 `language_server` 遥测裁剪逆向取证）、统一桌面启动器解析器 `analyseDesktopExec()`、原子切换状态机以及 Pacman Hook 的 Root 信任边界审计。
 
 ### 深度技术报告与参考手册
 - **[《技术报告：Mendel 实验开关门控机制与本地注入路径实测取证》（`docs/mechanism-mendel-gating.md`）](docs/mechanism-mendel-gating.md)**
@@ -212,7 +212,7 @@ node --test tests/
 - **零改动 `language_server` 二进制**：绝不修改 Go 二进制文件，彻底避免破坏 ELF 签名或干扰 `antigravity-context-unlock` 的备份配对。
 - **不分发完整第三方编译产物**：仓库体积仅百余 KB，不包含完整的 Antigravity Web UI 编译包或其提取资源；所有前端文件均在用户本机安装时从本机 `language_server` 实时提取。为完成定点修补，源码中含有少量用于唯一匹配的原厂代码锚点字符串，以及 Google 原生的第三方工具免责声明文案（`third-party-tools-disclaimer-text` 的默认载荷，用于在网关模式下复刻原生基线）。它们仅作为兼容性定位与基线数据存在，不构成可用软件的再分发。
 - **故障闭合（Fail-Closed）与先预备后提交顺序**：任何锚点出现次数不为 `1`、ZIP 条目 CRC32 不符或修改后未通过 V8 `vm.Script` 语法解析时，脚本在暂存阶段即安全中止（退出码 `3`）；`install` / `sync` 均先在暂存目录完成新前端包的完整构建与校验（`preparePatchedUi`），确认无误后才改写 `app.asar` 并原子切换目录（`commitPatchedUi`），绝不留下半成品或白屏包。
-- **`--dry-run` 全局零写入与按命令前置预检**：所有子命令在 `--dry-run` 模式下**绝不新增、修改或删除任何文件与目录**，并按各自职责执行只读预检（`install`/`sync` 执行完整 `self-test` 及备份可用性/缺失检查；`repair` 在内存中跑完提取、4 处补丁与 V8 语法验证；`restore`/`disable`/`extract`/`pacman-hook` 分别校验配对、启动器、空目录及 Root 路径权限链），使可只读判定的失败场景在预演中以相同退出码提前暴露。
+- **`--dry-run` 全局零写入与按命令前置预检**：所有子命令在 `--dry-run` 模式下**绝不新增、修改或删除任何文件与目录**，并按各自职责执行只读预检（`install`/`sync` 执行完整 `self-test` 及备份可用性/缺失检查；`repair` 在内存中跑完提取、5 处补丁与 V8 语法验证；`restore`/`disable`/`extract`/`pacman-hook` 分别校验配对、启动器、空目录及 Root 路径权限链），使可只读判定的失败场景在预演中以相同退出码提前暴露。
 - **UI 切换的提交状态机**：显式区分 `prepared` → `old-moved` → `committed` / `rolled-back` / `rollback-failed`，只有当新包确认落位或回滚确认成功后才删除旧副本；若替换与回滚同时失败，旧目录会被保留并在错误信息中给出绝对恢复路径与 `mv` 命令，绝不出现“唯一可用副本被清空”的情况。
 - **不删除用户数据**：`extract` 只允许写入**新建或空目录**，对非空目录直接拒绝（绝不递归清空），并显式拒绝 `/`、`$HOME`、安装根目录及其父目录等危险目标。
 - **区分“授权根”与“根以下的链接”**：普通文件与目录写入前先把目标根**一次**规范化到 `realpath`（因此用户自己的 `$HOME`、`--ui-dir` 或 `/tmp` 是符号链接也能正常工作），此后根以下出现任何符号链接立即中止；Pacman Hook 的 Root 脚本审计则更严格——词法链上出现任何符号链接即拒绝，并在 `realpath` 解析后的**物理**祖先链上逐级复核 `root:root` 归属与非组/他写权限。
@@ -291,7 +291,7 @@ rm -rf ~/.local/share/antigravity-uipatch ~/.local/share/antigravity-uipatch-bac
 ### 8.7 账号与实验表解析语义
 
 - 主通道（`Ola()`）与次级通道（`Qt().getMendelFlags`）共用 `__agyResolveExperiments()` 与 `__agyNormalizeMendel()`：
-  - **服务端成功返回非空数组**：更新 `__agyLastGood` 并原样保留线上实验表，仅确保 `enable-developer-mode` 开启；
+  - **服务端成功返回非空数组**：更新 `__agyLastGood` 并原样保留线上实验表，仅确保 `FLAGS`（`enable-developer-mode` 与 `enable-context-usage-indicator`）开启；
   - **服务端成功返回空数组 `[]`**（含网关模式常见响应 `{"experimentConfig":{}}` 经 Protobuf 解码补全为空数组的情形）：视为服务端撤回实验表（如切换至网关模式），**清空 `__agyLastGood` 并采用静态观测基线**；若响应连外层 `experimentConfig` 消息本身都缺失（顶层 `{}`），解码结果为 `undefined`，将按未知/异常响应保留上一次缓存；
   - **RPC 请求抛出异常**：两条通道均捕获异常并回退至 `__agyLastGood`（从未成功拉取过实时表时回退静态基线）。
 - `41 + 7` 静态基线为**指定账号与构建版本下的实测快照**，不承诺所有 Google 账号、地区或未来时段云端下发集合恒等。

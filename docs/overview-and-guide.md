@@ -1,6 +1,6 @@
-# 原理与使用指南：Antigravity 桌面端实验开关门控机制与解锁方案
+# 原理与使用指南：Antigravity 桌面端实验开关门控与上下文推理遥测面板
 
-> 本文档面向希望快速理解 Antigravity 桌面端在“企业网关模式”与“Google 原生账号模式”下部分前端界面（`Extensions` 插件菜单、内置 `Terminal`、多标签右侧栏、原生 `File Explorer` 标签页、`Settings -> Developer` 面板）被隐藏的真实原因、三层解耦补丁的工作方式、跨随机端口持久化机制以及日常升级维护流程的用户与开发者。底层协议验证、字节级补丁对比与完整开关清单请参阅配套技术文档：
+> 本文档面向希望快速理解 Antigravity 桌面端在“企业网关模式”与“Google 原生账号模式”下部分前端界面（`Extensions` 插件菜单、内置 `Terminal`、多标签右侧栏、原生 `File Explorer` 标签页、`Settings -> Developer` 面板）被隐藏的真实原因、**`2.30+` 上下文容量与双层推理遥测指示器（`Context & Inference Indicator`）的指标含义与实机读数规律**、三层解耦补丁的工作方式、跨随机端口持久化机制以及日常升级维护流程的用户与开发者。底层协议验证、字节级补丁对比与完整开关清单请参阅配套技术文档：
 > - [《补丁架构与脚本实现详解》（`patch-internals.md`）](patch-internals.md)
 > - [《技术报告：Mendel 实验开关门控机制与本地注入路径实测取证》（`mechanism-mendel-gating.md`）](mechanism-mendel-gating.md)
 > - [《技术参考：Antigravity 桌面端实验特性开关全景目录》（`custom-flags-catalog.md`）](custom-flags-catalog.md)
@@ -94,7 +94,104 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 
 ---
 
-## 2. 全景横向对比：未修补各模式 vs. 应用 `antigravity-uipatch` 后
+## 2. 上下文容量与推理遥测面板（`Context & Inference Indicator`）读数指南与设计解惑
+
+在 `antigravity 2.30+ / 2.31` 外部发行版中，Google 将入口插槽 `buildBindings.contextUsageIndicator` 置为了 `void 0` 并剔除了原版组件代码。本工具通过洁净室原创组件 `__AgyContextIndicator` 恢复并大幅增强了输入框右下角的上下文圆环指示器（同时自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 外观开关）。
+
+### 2.1 面板结构一览与二维正交矩阵设计
+
+点击输入框右下角的圆环百分比按钮（如 `◯ 64% · 145 t/s`），将展开如下三段式浮层面板：
+
+```text
+Context Window             t/s [Off | Turn | Avg]   63.6%
+▓▓▓▓████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+500.0K / 786.4K tokens used
+─────────────────────────────────────────────────────────
+● Instructions & tools ▾                      20.0K · 2.5%
+  │ System            13.5K   Tools                  6.5K
+● Conversation                              480.0K · 61.0%
+○ Available                                 286.5K · 36.4%
+─────────────────────────────────────────────────────────
+Last Turn                                      [↻ 1 retry]
+Input             644.1K   Output                     379
+Cache hit          99.0%   Response                   230
+In speed      402.5K t/s   Out speed            144.5 t/s
+TTFT               1.60s   Duration                 4.22s
+─────────────────────────────────────────────────────────
+Σ Session · 24 turns                [! 1 error] [↻ 3 retries]
+Σ Input           12.45M   Σ Output                 42.8K
+Σ Cache hit        95.8%   Σ Response               14.7K
+Avg In speed  368.0K t/s   Avg Out speed        139.2 t/s
+Avg TTFT           1.74s   Avg Duration             4.08s
+```
+
+面板排版的四项核心取舍：
+1. **左入右出、同行同维的 `4×2` 二维正交矩阵**：
+   - **按列划分阶段**：**左列全部属于输入预填充阶段（Prefill）**，从发了多少输入（`Input`）→ 命中多少缓存（`Cache hit`）→ 输入处理速率（`In speed`）→ 首字等待多久（`TTFT`）形成完整因果链；**右列全部属于输出解码阶段（Decode）**，从生成多少总输出（`Output`）→ 其中正文占多少（`Response`）→ 吐字速率（`Out speed`）→ 整轮耗时（`Duration`）一气呵成。
+   - **按行对齐量纲**：第 1 行对比核心总量、第 2 行对比有效构成、第 3 行对比吞吐速率（同为 `t/s`）、第 4 行对比时间延迟（同为秒），消除隔行横跳与单位混排。
+2. **`Σ`（累积）与 `Avg`（平均）上下分区**：在全对话汇总区中，前两行体量与构成指标统一使用 `Σ` 标记全局总和，后两行速率与耗时指标统一使用 `Avg` 标记单轮均值（不用希腊字母 `μ` 以免在 `TTFT` 旁被误读为微秒 `μs`）。
+3. **`Last Turn` 与 `Σ Session · N turns` 标题呼应**：下方汇总区无需额外点击切换即可同屏纵览；标题显式冠以 `Σ` 并附带单位 `turns`，与上方的 `Last Turn` 形成“最近 1 轮 vs. 当前会话累计 `N` 轮”的明确对照，避免被误读为“第 N 号会话”。
+4. **克制减法（不堆砌冗余信息）**：Google OAuth 原生通道（CCPA）不向客户端回传内部后端路由模型代号，而当前选中的前端模型与配额状态已在输入框左下角模型选择器中直接可见，因此面板不重复展示模型名徽章与配额条。
+
+---
+
+### 2.2 各指标精确定义与悬停提示速查表
+
+面板中几乎所有数值均支持**鼠标悬停（Tooltip）**查看未缩写的精确整数与拆分明细：
+
+| 区域 / 指标 | `Last Turn`（单轮口径） | `Σ Session · N turns`（全会话口径） | 鼠标悬停（Tooltip）附加明细 |
+|---|---|---|---|
+| **`Context Window`** | 当前上下文已用估算值 / 窗口上限（`≥80%` 自动变琥珀色告警；压缩后带 `~ Approx` 标记；`Instructions & tools` 可点击折叠） | — | 精确到个位的已用 / 上限 Token 数 |
+| **`t/s [Off \| Turn \| Avg]`** | `Turn`：在底栏圆环旁实时显示 `Last Turn` 的 `Out speed`（即时感知云端快慢） | `Avg`：在底栏显示全会话稳态均值 `Avg Out speed`（平滑单轮突发）；`Off`：仅显示百分比（设置持久保存于 `app_storage.json`） | 各档位说明 |
+| **`Input`** | 当轮实际发送的总 Prompt 输入（`未命中新增 + 缓存读取 + 缓存写入`） | `Σ Input`：第 `1..N` 轮累计发送的总输入 Token 数 | 缓存命中 Token 数 + 未命中新计算 Token 数拆分 |
+| **`Output`** | 当轮模型总输出 Token 数（`Response + Thinking`） | `Σ Output`：第 `1..N` 轮累计总输出 Token 数 | `Response` Token 数 + `Thinking` Token 数精确拆分 |
+| **`Cache hit`** | 当轮前缀缓存命中率 `cacheRead ÷ Input`（一位小数；存在未命中 Token 时封顶 `99.9%`，防虚标 `100.0%`） | `Σ Cache hit`：全会话全局命中率 `ΣcacheRead ÷ ΣInput` | 精确命中数 / 总输入数（及本轮新增未缓存数） |
+| **`Response`** | 当轮正文与工具调用参数 Token 数（对应 `responseOutputTokens`，不含思考） | `Σ Response`：第 `1..N` 轮累计正文与工具 Token 数 | 精确正文 Token 数及排除的 `Thinking` Token 数 |
+| **`In speed`** | 当轮等效输入吞吐速率 `Input ÷ TTFT` | `Avg In speed`：全局加权平均 `ΣInput ÷ ΣTTFT` | 精确每秒输入 Token 数 |
+| **`Out speed`** | 当轮流式解码吐字速率 `Output ÷ 纯流式耗时` | `Avg Out speed`：全局加权平均 `ΣOutput ÷ Σ流式耗时` | 精确每秒输出 Token 数 |
+| **`TTFT`** | 首字响应等待时间（请求发出 → 首个流式分片到达） | `Avg TTFT`：各轮首字等待时间的算术平均值 | （若部分轮次无计时则注明覆盖轮数） |
+| **`Duration`** | 当轮端到端总耗时（`TTFT + 纯流式耗时`） | `Avg Duration`：单轮平均总耗时 | **全会话累计总耗时**（如 `Total observed: 1m 38s across 24 calls`） |
+| **`! error` / `↻ retry`** | 当轮发生的失败报错或后端静默自动重试次数（正常为 `0` 时完全隐藏） | 全会话第 `1..N` 轮累计的报错总数与静默重试总数 | 具体报错信息，或重试次数与累计退避等待秒数 |
+
+---
+
+### 2.3 实机读数常见现象与深度问答
+
+#### Q1：为什么不在模型吐字过程中实时跳表，而是等每轮完成后才整组刷新（快照机制）？
+这是针对 Agent 多步工作流专门做的体验优化，原因有二：
+1. **流式中途缺乏精确 Token 分母，估算会导致速率“反向衰减”假象**：服务端仅在整轮流结束的最后一个数据包才下发精确的 `ModelUsageStats`。若在流式期间用 `可见字符数 / 4 / 已流逝秒数` 配合定时器强行估算，一旦模型进入**流式生成工具调用 JSON 参数**阶段（如 `edit_file`、`run_command`，其内容不计入聊天文本字符）或思考分块缓冲间隙，就会出现“分子停滞不动、分母秒表持续累加”，导致面板上的速率肉眼可见地一路暴跌，且中英文混排按字符除以 4 误差极大。
+2. **避免 Agent 连续调工具时面板频繁闪回 `—`**：在一次任务中，Agent 往往连续执行十余轮“思考 → 调工具 → 0.5 秒后立即进入下一轮调用”。若新一轮一开始就把未出结果的指标清空成 `—`，任务运行期间点开面板 90% 的时间只能看到残缺横杠。采用**完成态原子快照机制**后，面板始终稳定展示最近一轮已完成的完整精确数据（新一轮生成期间仅在 `Last Turn` 旁轻提示 `· Generating…`），待新一轮彻底完成后再一次性无感刷新。
+
+#### Q2：这里的 `Cache hit` 指的是哪种缓存？为什么早期简单相除会出现超过 `100%` 的怪象？
+1. **缓存类型**：它是大模型服务端的 **Context / Prefix KV Cache（上下文前缀缓存）**。在多轮对话或 Agent 连续工具调用中，每一轮请求都要把「系统提示词 + 工具定义 + 此前全部对话历史」重新发给模型（长对话单轮输入常达 `500K～700K` tokens）。服务端会将前序轮次算过的长前缀注意力 Key/Value 张量缓存在显存或高速缓存池中，下一轮直接复用前 `98%～99%` 的历史前缀，只需对末尾新增的几千 tokens 做预填充计算。
+2. **底层字段口径**：反汇编 `language_server` 的 `genairesponse.MapUsageMetadata` 可见，后端在将 Gemini 原始返回的 `promptTokenCount`（总输入）与 `cachedContentTokenCount`（缓存命中）写入前端 `ModelUsageStats` 时，为了对齐 Anthropic 的计费字段惯例，**提前执行了减法 `inputTokens = promptTokenCount - cachedContentTokenCount`**。也就是说，`u.inputTokens` 存的只是**未命中缓存的新增输入**（例如 `6,505`），而非总输入（`644,060`）。本工具将其还原为真实总输入 `totIn = inputTokens + cacheReadTokens + cacheWriteTokens` 作分母，并在未达 100% 全命中时封顶显示 `99.9%`，确保读数真实严谨。
+
+#### Q3：为什么即便 `99%` 命中了缓存，上下文越长时 `TTFT` 也依然会变慢？`In speed` 与 `TTFT` 该怎么配合看？
+从 Transformer 推理的物理机制来看，Prefix KV Cache 省掉的是「把几十万历史 tokens 重新计算一遍 K/V 向量」的算力，但**有两笔开销依然随总上下文长度线性增长**：
+1. **KV 缓存搬运开销**：几十万 tokens 对应的数 GB 乃至数十 GB 历史 KV 张量，仍需从远端缓存池或高带宽显存（HBM）加载进计算核心；
+2. **交叉注意力计算（Cross-Attention）**：本轮新增的未缓存 tokens，仍需在每一层与前面全部几十万个历史 K/V 向量做注意力点积（耗时正比于 `新增长度 × 总上下文长度`）。
+
+把左列的 **`In speed`（`Input ÷ TTFT`）**、**`TTFT`** 与 **`Cache hit`** 三者结合起来看，诊断效率极高：
+- **消除长度干扰看吞吐**：上下文从 `20K` 涨到 `650K` 时，`TTFT` 从 `0.4s` 升至 `1.6s` 属于正常物理增长；此时左侧 `In speed` 高达 **`400K+ t/s`**，一眼就能确认缓存加速正在高效工作；
+- **区分“缓存过期”与“服务端拥堵”**：
+  - 若 `TTFT` 突然飙到 `20s`，且 `Cache hit` 掉到 **`0.0%`**、`In speed` 跌至 `20K～30K t/s` → 说明停顿超过约 5 分钟导致服务端前缀缓存过期，正在全量重算长上下文；
+  - 若 `TTFT` 飙到 `15s`，但 `Cache hit` 依然高达 **`99.0%`** → 说明缓存并未失效，纯粹是当前云端推理队列正在排队拥堵。
+
+#### Q4：为什么偶尔能看到某一轮流式生成耗时只有 `0.1～0.3s`、输出却有 100 多 tokens，导致单轮 `Out speed` 飙到近千 `t/s`？
+这是由 **Gemini 服务端的工具调用整包缓冲机制（FunctionCall Buffering）** 引起的真实协议现象：
+- **普通文字回复**是边生成边推送的（几个词一个 SSE 分片），因此客户端测到的「首包 → 末包」时长（`streamingDuration`）基本等于真实的逐词生成耗时（常规约 `110～180 t/s`）。
+- **结构化工具调用（如 `run_command`、`read_file` 的 JSON 参数）**则不同：服务端为确保下发的工具调用 JSON 语法完整合法，会在云端把整个工具调用参数全部生成并校验完毕后，**装进单个数据包一次性推给客户端**。
+- 当某一轮模型没有输出长段可见思考文本、直接发起工具调用时（例如总共输出 `138` tokens），服务端实际花掉的数秒生成时间因为尚未发出首包，**全部被计入了客户端的 `TTFT`（如 `14.35s`）**；等整包 `138` tokens 到达客户端触发“首包计时”后，仅隔 `0.15s` 就收到了流结束包，于是客户端视角下的瞬时接收速率 `138 ÷ 0.15s` 就会高达 `900+ t/s`（同理，短轮次若首包已打包大块思考文本，也会使剩余流式窗口偏短）。
+- **如何看待该数值**：在 `Last Turn` 中结合 `TTFT` 与 `Duration` 对照即可一眼识别此类“整包突发轮”；而在下方的 **`Σ Session`** 中，`Avg Out speed` 采用的是 **全局总输出 ÷ 全局总流式耗时（$\sum \text{Output} \div \sum \text{StreamDur}$）** 的加权平均而非简单算术平均，因此偶发的 `0.15s` 短包突发不会拉偏整场对话的真实平均速率。底栏右上角的 **`t/s [Off | Turn | Avg]`** 开关也允许按个人偏好自由选择：想实时观察当前云端快慢选 **`Turn`**，想看平稳不跳变的长期吞吐选 **`Avg`**。
+
+#### Q5：全会话 `Σ Session · N turns` 汇总上百轮历史记录，会不会多占内存或拖慢长对话滚动？
+**完全不会。** Antigravity 在底层将对话数据拆分为体积悬殊的两份独立列表：
+1. **`steps`（聊天正文与工具输出，体积大）**：包含全部对话文本、思考原文及读写文件/命令输出日志，长对话可达数十 MB。官方默认采用**最近 50 步滚动懒加载**（`startIndex: -50`），向上翻阅历史时才按需加载。**本工具对 `steps` 的懒加载策略未做任何改动**，聊天窗口流畅度与原版 100% 一致。
+2. **`generatorMetadatas`（纯数字统计账本，体积微小）**：由于实时流在 `PROD_UI` 模式下会清空 `chatModel` 字段，本工具通过专用本地 RPC `getCascadeTrajectoryGeneratorMetadata` 按偏移量**增量拉取**服务端已剥离消息正文的轻量统计记录（每轮仅约百余字节，即便聊满 200 轮也仅约二三十 KB，后续每完成一轮仅增量拉取最新 1 条）。因此，哪怕经历了 `/compact` 上下文压缩、按 `Ctrl+R` 刷新或重启软件重开老对话，`Σ Session · N turns` 依然能零负担地精确还原从第 1 轮至今的全部历史数据。
+
+---
+
+## 3. 全景横向对比：未修补各模式 vs. 应用 `antigravity-uipatch` 后
 
 | 对比维度 | 原版：企业网关模式 | 原版：Google OAuth 个人账号 | 应用 `antigravity-uipatch` 后（任意模式） |
 |---|---|---|---|
@@ -104,7 +201,7 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 | **未灰度实验项（如 `fileExplorerTab`）** | 隐藏 | 隐藏 | **可在 `Developer` 面板按需添加** |
 | **手动修改开关的作用范围与持久化** | — | 面板隐藏；直读开关因 `SetMendelFlagOverrides` 权限拒绝无法本地覆盖 | **全通道实时响应覆盖，保存于 `~/.config/Antigravity/app_storage.json`，重启与重装均保留** |
 | **网络抖动时的实验表** | — | 原版主入口在失败时返回 `undefined`，下游保留已加载的表 | **主/次双通道在请求失败时均保留 last-known-good；服务端成功返回空表时清空旧缓存并采用静态基线** |
-| **上下文容量与推理遥测指示器** | `2.30+` 外部包已剥离为 `void 0` | `2.30+` 外部包已剥离为 `void 0` | **开箱默认挂载洁净室增强版（展示 `TokenType` 细分、真实响应模型、`TPS`/`Pin t/s`、`TTFT`、`Cache hit`、`Duration`、`Output`/`Thinking` 与重试角标）** |
+| **上下文容量与推理遥测指示器** | `2.30+` 外部包已剥离为 `void 0` | `2.30+` 外部包已剥离为 `void 0` | **开箱默认挂载洁净室增强版（展示 `TokenType` 细分，以及 `Last Turn` 与 `Σ Session · N turns` 双 `4×2` 遥测：`Input`/`Output`/`Cache hit`/`Response`/`In speed`/`Out speed`/`t/s [Off\|Turn\|Avg]`/`TTFT`/`Duration` 与报错重试角标）** |
 | **开关候选框滚动体验** | — | 原生 `<datalist>` 弹窗白底且**无法滚动** | **深色主题向上展开，支持滚轮 / 键盘导航 / 自动滚动入视区，含 ARIA listbox 语义** |
 | **误删/误覆盖防护** | — | — | **`--dry-run` 绝对零写入；`extract` 拒绝非空目录；UI 切换双失败时保留旧副本并给出恢复路径** |
 | **是否修改 `language_server` 二进制** | 否 | 否 | **否**（纯内存只读提取内嵌 ZIP） |
@@ -112,7 +209,7 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 
 ---
 
-## 3. 常见注意事项与边界说明
+## 4. 常见注意事项与边界说明
 
 1. **务必从系统应用菜单（桌面启动器）启动 Antigravity**：
    - `AGY_UI_BUNDLE` 环境变量写入在 `~/.local/share/applications/antigravity.desktop` 的 `Exec=` 行中。若直接在终端裸敲 `antigravity` 命令且当前 shell 未导出 `AGY_UI_BUNDLE`，由于 `app.asar` 钩子处于惰性状态，应用会按原厂内置 UI 启动（这也是紧急排查时免卸载回退原厂 UI 的快捷方式）。

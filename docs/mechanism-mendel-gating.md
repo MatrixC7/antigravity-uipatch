@@ -15,7 +15,7 @@
 3. **直读 Mendel 通道与本地持久化存储在公开构建下处于断路状态。**
    宿主以 `--https_server_port 0` 在随机回环端口提供 UI。`2.31` 起前端虽引入 `clientStorageFeature`（经 Electron `window.nativeStorage` 读写 `~/.config/Antigravity/app_storage.json`）持久化 `FeatureManagerV2` 的 `customFlag`，但直读与次级 Mendel 布尔通道仍依赖被拒绝的 `SetMendelFlagOverrides` RPC，必须将 `storageService` 与直读读取器桥接才能实现全通道覆盖。
 4. **`language_server` 原生提供 `-web_bundle_path` 静态资源覆盖接口，且 Electron 宿主二进制未启用嵌入式 ASAR 完整性校验 Fuse。**
-   结合 `dist/languageServer.js` 的 5 行惰性环境变量钩子与外置 Web UI 四处结构化前端汇聚点修补，可在**零改动 `language_server` 二进制**的前提下完整对齐原生基线、打通双向实时覆盖并实现跨重启/重装持久化。
+   结合 `dist/languageServer.js` 的 5 行惰性环境变量钩子与外置 Web UI 五处结构化前端汇聚点修补，可在**零改动 `language_server` 二进制**的前提下完整对齐原生基线、打通双向实时覆盖、恢复增强型上下文推理遥测面板并实现跨重启/重装持久化。
 
 ---
 

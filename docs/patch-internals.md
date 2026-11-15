@@ -6,7 +6,7 @@
 
 ## 1. 设计目标与工程约束
 
-Antigravity 桌面端的界面控制逻辑位于 `language_server` 二进制内嵌的 `agy_hub_web_bundle` ZIP 归档（核心为约 11.2 MB 的压缩编译产物 `main.js`），而子进程启动参数则位于 `/opt/Antigravity/resources/app.asar` 的 `dist/languageServer.js` 中。为兼顾安全性、可维护性与多工具共存，`antigravity_uipatch.mjs` 遵循四项核心工程约束：
+Antigravity 桌面端的界面控制逻辑位于 `language_server` 二进制内嵌的 `agy_hub_web_bundle` ZIP 归档（核心为约 11.9 MB 的压缩编译产物 `main.js`），而子进程启动参数则位于 `/opt/Antigravity/resources/app.asar` 的 `dist/languageServer.js` 中。为兼顾安全性、可维护性与多工具共存，`antigravity_uipatch.mjs` 遵循四项核心工程约束：
 
 1. **零外部依赖（纯 Node.js 标准库）**：完全基于 `node:fs`、`node:zlib`、`node:crypto`、`node:vm` 等内置模块实现 ASAR 归档打包、ZIP 中央目录解析、DEFLATE 解压、IEEE 802.3 CRC32 校验与 JavaScript 语法树预检，不依赖任何第三方 npm 包，也不依赖外部 `/usr/bin/unzip` 或 `@electron/asar` CLI。
 2. **字节级无损往返（Byte-Identical Round-Trip）**：对 `app.asar` 采用**原数据区零移动、仅尾部追加修改项**的打包算法。当替换映射为空时，`repack()` 直接返回原缓冲区（任意合法输入逐字节 100% 一致）；修改单一条目（`dist/languageServer.js`）时，原厂其余 `1,111` 个文件条目及任何前序第三方归档补丁的偏移量与字节流均分毫不差地原样保留。
@@ -176,21 +176,31 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 3. 截取函数体后检查内部是否包含额外的 `function <name>(` 声明，若命中则判定边界异常并中止。
 该设计面向当前已验证的编译组件结构（非通用 JS 词法解析器），若未来上游组件结构发生较大变化，升级时以显式退出码 `3` 提示适配新锚点。
 
-### 4.5 补丁 5：`context-usage-indicator`（`buildBindings` 洁净室上下文容量与实时推理遥测指示器）
+### 4.5 补丁 5：`context-usage-indicator`（`buildBindings` 洁净室上下文容量与双层推理遥测指示器）
 
-在 `antigravity 2.30+` 外部发行包中，Google 在入口自执行调用的 `buildBindings` 字面量（`})({autonomousMode:...`）内将 `contextUsageIndicator` 置为了 `void 0`，使原版组件被 Closure Compiler Tree-Shake 剔除、设置项被压入 `deniedSettings`。然而上游宿主仍完整保留了设置过滤逻辑（`!!bA()?.contextUsageIndicator`）、工具栏挂载点（`B.createElement(sj, { conversationId: d })`）以及后端 `language_server` 流式推送的 `contextWindowUsage` 与 `generatorMetadatasInSlice`（反汇编 `PruneGeneratorMetadata` 证实后端在 `PROD_UI` 模式下仅清空 Prompt 文本切片，完整保留 `ChatModelMetadata` 全部遥测字段）。
+在 `antigravity 2.30+` 外部发行包中，Google 在入口自执行调用的 `buildBindings` 字面量（`})({autonomousMode:...`）内将 `contextUsageIndicator` 置为了 `void 0`，使原版组件被 Closure Compiler Tree-Shake 剔除、设置项被压入 `deniedSettings`。然而上游宿主仍完整保留了设置过滤逻辑（`!!bA()?.contextUsageIndicator`）、输入框底栏挂载点（`B.createElement(sj, { conversationId: d })`）以及后端 `language_server` 的会话上下文与轨迹遥测数据。
 
-`PATCH_CONTEXT_INDICATOR` 采用 **100% 洁净室原创代码**（不拷贝 `2.29` 任何闭源字节）：
-1. **顶层键值扫描与三模式策略（`--indicator-mode`）**：
-   - 通过 `findTopLevelObjectProperty()` 精确定位 `buildBindings` 顶层唯一 `contextUsageIndicator:` 属性的值区间；
-   - 默认 **`custom` 模式**：无论上游为 `void 0` 还是简单原生实现均挂载增强组件 `__AgyContextIndicator`；若未来某版上游**同时**恢复非空原生实现并重构了内部会话 Hook，脚本自动安全降级保留上游原生实现（`native-fallback`），绝不阻断 `pacman -Syu` 同步；若上游仍为 `void 0` 而锚点失配，则严格以退出码 `3` 故障闭合中止；
+`PATCH_CONTEXT_INDICATOR` 采用 **100% 洁净室原创代码**（不拷贝 `2.29` 任何闭源字节），由三部分组成：
+
+1. **顶层键值扫描与三模式升级策略（`--indicator-mode`）**：
+   - 通过 `findTopLevelObjectProperty()` 在 `buildBindings` 对象字面量内精确定位顶层唯一 `contextUsageIndicator:` 属性的值区间（扫描至该属性值结束即立刻返回，避开后方字母序属性 `getAppVariant` 函数体内的正则字面量；同时避开偏移 `9.35M–11.1M` 处内嵌 ElkJS/GWT 闭包内的局部同名短符号）；
+   - 默认 **`custom` 模式**：无论上游为 `void 0` 还是简单原生实现均挂载增强组件 `__AgyContextIndicator`；若未来某版上游**同时**恢复非空原生实现并重构了内部会话 Hook，脚本自动安全退让保留上游原生实现（`native-fallback`），绝不阻断 `pacman -Syu` 同步；若上游仍为 `void 0` 而锚点失配，则严格以退出码 `3` 故障闭合中止；
    - 另支持 **`polyfill` 模式**（仅在 `void 0` 时注入，上游有原生实现时直接旁路）与 **`stock` 模式**（保持原厂不变）。
-2. **动态符号解析（全文件唯一结构断言）**：
-   - 会话状态订阅 Hook（`$B`）、Protobuf 枚举命名空间（`I.TokenType` / `I.CortexStepStatus` 与 `E.Model`）、React 命名空间（`B`）及 `ReactDOM.createPortal`（`nw`）全部通过 `(?<![A-Za-z0-9_$])` 边界锚点动态捕获；
-   - 使用静态模块级选择器 `{ selector: s => s ? s.agentState : void 0 }` 直接返回不可变引用，杜绝 `useSyncExternalStore` 快照分配循环；浮层经 `createPortal(..., document.body)` 以 `position: fixed` 挂载，脱离 `surface-composer-card` 的 `z-[1]` 层叠上下文且仅依赖 `compiled_tailwind.css` 中实测存在的 24 个核心工具类与内联样式。
-3. **双区实时遥测能力**：
-   - **Context Window 区**：按 `TokenType` 拆分 `Instructions & tools`（支持折叠展开 `System` / `Tools` / `MCP` / `Rules/Skills` / `Agents/Plugins` 非零子项）、`Conversation` 与 `Available`，自动识别 `estimatedAfterCompaction` 或 `lastStepIndex` 之后的已完成非 `intentOnly` `checkpoint` 步骤标记 `~`；
-   - **Last Turn / Generating 遥测区**：读取最新 `CortexStepGeneratorMetadata`（流式生成期间校验 `stepIndices` 防止串读上一轮旧数据，按实时字符流动态估算 `~tok/s`）展示后端真实返回模型 ID（三级回退 + 一键复制）、`Speed`（支持浮层内 `Pin t/s` 跨端口持久化常驻底栏）、`TTFT`、`Cache hit`、`Duration`、`Output`、`Thinking` 以及 `retries > 0` 时的静默重试告警角标。
+
+2. **动态符号解析、样式隔离与增量元数据通道**：
+   - 会话状态订阅 Hook（`$B`）、Protobuf 枚举命名空间（`I.TokenType` / `I.CortexStepStatus`）、React 命名空间（`B`）、`ReactDOM.createPortal`（`nw`）及 `getCascadeTrajectoryGeneratorMetadata` 请求构造器（`Wb` / `dia`）全部通过 `(?<![A-Za-z0-9_$])` 边界锚点动态捕获（避免 `\b` 在 `$` 前缀标识符处失效或无左边界引发二次回溯）；
+   - 使用静态模块级选择器 `CTX_SEL = { selector: s => s ? s.agentState : void 0 }` 直接返回不可变引用，杜绝 `useSyncExternalStore` 快照分配死循环；
+   - 由于 `2.31` 预编译样式表 `compiled_tailwind.css` 已将 `.bg-popover`、`--popover` 等未引用类 Purge 剔除，浮层经 `createPortal(..., document.body)` 以 `position: fixed, zIndex: 9999` 挂载以脱离输入框 `surface-composer-card` 的 `z-[1]` 层叠上下文，并严格限定使用样式表中实测存在的基础工具类（`bg-card`、`bg-secondary`、`border-border`、`tabular-nums` 等）与宿主 CSS 变量。
+
+3. **`language_server` 逆向取证确认的四项底层数据修正**：
+   - **实时流裁剪与增量 RPC 补齐（`TruncateGeneratorMetadataInPlace` vs. `StripMessagesFromGeneratorMetadata`）**：反汇编确认 `StreamAgentStateUpdates` 在 `PROD_UI` 级别下会经 `truncator.TruncateGeneratorMetadataInPlace`（`0x6ab0060`）将流内 `CortexStepGeneratorMetadata.chatModel` 整块置空；而专用接口 `Server.GetCascadeTrajectoryGeneratorMetadata`（`0x8345ae0`）调用的是 `utils.StripMessagesFromGeneratorMetadata`（`0x6ae59a0`），仅剥离大体积消息文本，100% 保留第 `0..N-1` 轮完整的 `timeToFirstToken`、`streamingDuration`、`usage`、`retries` 与 `error`。组件借由 `PATCH_MENDEL_OVERRIDES` 暴露的 `__agyLsClient` 按 `generatorMetadataOffset` 增量拉取并缓存该轻量统计（每条约百余字节），实现跨 `/compact` 与跨重启的全会话 `Σ Session · N turns` 汇总。
+   - **缓存命中率分母还原（`genairesponse.MapUsageMetadata`）**：反汇编 `0x7af67a0`（偏移 `0x7af68a6` 处 `sub esi, r10d`）证实后端在写入 `ModelUsageStats` 时已提前执行 `inputTokens = promptTokenCount - cachedContentTokenCount`（未命中新增输入）。前端统一按 `totIn = inputTokens + cacheReadTokens + cacheWriteTokens` 还原真实总输入分母，并在 `cacheRead < totIn` 时封顶显示 `99.9%`。
+   - **步骤回退时间戳顺序陷阱（`createdAt` vs. `startedAt`）**：对实机 SQLite 轨迹库（`conversations/<id>.db`）取证确认，`plannerResponse` 步骤上的 `metadata.startedAt`（字段 `#32`）是在流式生成结束、执行器切换步骤状态时才写入的（`startedAt === finishedGeneratingAt > viewableAt > createdAt`）。在增量 RPC 尚未返回的瞬时兜底分支中，`stepStartMs()` 仅在 `startedAt` 严格早于 `viewableAt` 时才采用，否则一律取真实请求起点 `createdAt`（字段 `#1`）。
+   - **重试记录数组基数修正（`retries` vs. `retryInfos`）**：实测轨迹库证实 `ChatModelMetadata.retryInfos`（字段 `#17`）记录的是**总尝试次数**（即 `0` 次重试的正常单次调用也会包含 `1` 条成功记录，`retryInfos.length === retries + 1`），因此严格以 `cm.retries`（字段 `#14`）为准，仅在字段缺省且 `retryInfos.length > 1` 时回退为 `retryInfos.length - 1`。
+
+4. **原生视觉对齐与三段式快照界面（无轮询定时器）**：
+   - 底栏触发按钮严格对齐宿主 `.agy-composer-footer` 相邻按钮规格（`h-7` `28px` 胶囊高、`text-sm` 随缩放字号、`w-4 h-4` `16×16` 圆环盒、`text-secondary-foreground` 与 `hover:bg-secondary` 无边框胶囊交互）；
+   - 彻底摒弃流式期间的 `setInterval` 字符估算，仅在每轮调用完成并取得精确统计后原子刷新 **`Last Turn`** 与 **`Σ Session · N turns`** 两组 `4×2` 正交矩阵（左列输入侧：`Input` / `Cache hit` / `In speed` / `TTFT`；右列输出侧：`Output` / `Response` / `Out speed` / `Duration`；右上角提供 `t/s [Off | Turn | Avg]` 三段式底栏速率切换开关并持久保存至 `app_storage.json`），并在两侧标题栏分别汇总当轮与全会话的失败报错（`! error`）与静默重试（`↻ retry`）角标。
 
 ---
 
@@ -200,7 +210,7 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 - **`atomicWriteFile()`**：拒绝覆盖符号链接或非常规文件；经 `resolveWriteRoot()` 一次规范化目标父目录并由 `assertNoSymlinkBelowRoot()` 校验无根下链接后，在同目录创建 `.tmp-<name>-<pid>-<rand>` 独占临时文件（`wx`），写入后执行 `fsync`、继承原文件权限位与属主，再通过 `fs.renameSync` 原子替换并对目录执行 `fsync`。
 - **`preparePatchedUi()` + `commitPatchedUi()` 四阶段提交状态机**：
-  1. `preparePatchedUi()` 先在 `fs.mkdtempSync()` 独占创建的 `.uipatch-staging-*` 目录中完成全部 `548` 个条目的解压、CRC32 校验、4 处前端补丁替换与 V8 `vm.Script` 语法验证，并写入 `uipatch.json` 元数据（`schemaVersion: 2`，记录引擎 `CL`、`nativeBaselineCounts`、`mainJsBytes` 与 `mainJsSha256`）。`install` / `sync` 在改写 `app.asar` **之前**先完成此步骤（且在写回 `app.asar` 前复核磁盘 `ino` 与 `mtimeMs` 未并发变化），确保前端锚点失配绝不会留下“ASAR 已改、UI 未变”的半完成状态。
+  1. `preparePatchedUi()` 先在 `fs.mkdtempSync()` 独占创建的 `.uipatch-staging-*` 目录中完成全部 `548` 个条目的解压、CRC32 校验、5 处前端补丁替换与 V8 `vm.Script` 语法验证，并写入 `uipatch.json` 元数据（`schemaVersion: 2`，记录引擎 `CL`、`nativeBaselineCounts`、`mainJsBytes` 与 `mainJsSha256`）。`install` / `sync` 在改写 `app.asar` **之前**先完成此步骤（且在写回 `app.asar` 前复核磁盘 `ino` 与 `mtimeMs` 未并发变化），确保前端锚点失配绝不会留下“ASAR 已改、UI 未变”的半完成状态。
   2. `commitPatchedUi()` 按 `prepared` → `old-moved` → `committed` / `rolled-back` / `rollback-failed` 推进：仅当**本进程自身成功**将 staging 提升为正式目录（`committed`）或将 `.uipatch-old-*` 移回原位（`rolled-back`；若回滚前目标路径已被外部重新创建，仅允许移回空目录，非空目录拒绝覆盖）时，`finally` 才会清理 `.uipatch-old-*`。一旦提升与回滚同时失败（`rollback-failed`），旧目录被完整保留并在抛出的 `PatchError` 中打印绝对恢复路径与 `mv` 命令。
 
 ### 5.2 内容级备份配对校验与坏备份隔离重建
@@ -225,7 +235,7 @@ Pacman `PostTransaction` Hook 由 `libalpm` 以 `root` 身份、`HOME=/root` 环
 
 ### 5.4 `--dry-run` 前置预检与 `verify` 四态健康契约
 
-- **`--dry-run` 全局零写入与按命令预检**：所有子命令在 `--dry-run` 模式下保证零文件/目录变动，并执行各自对应的只读预检——`install` / `sync` 调用共享 `preflightAll()`（运行完整 `cmdSelfTest` 并模拟 `ensurePairedBackup` 的全部分支，包括“已挂钩但缺失备份”与“已挂钩但备份损坏/失配”均与真实运行一样返回退出码 `3`）；`repair` 在内存中读取二进制、提取 `main.js` 并运行完整 4 处补丁与 V8 语法检查；`restore`、`disable`、`extract`、`pacman-hook --write` 分别校验各自前置条件。
+- **`--dry-run` 全局零写入与按命令预检**：所有子命令在 `--dry-run` 模式下保证零文件/目录变动，并执行各自对应的只读预检——`install` / `sync` 调用共享 `preflightAll()`（运行完整 `cmdSelfTest` 并模拟 `ensurePairedBackup` 的全部分支，包括“已挂钩但缺失备份”与“已挂钩但备份损坏/失配”均与真实运行一样返回退出码 `3`）；`repair` 在内存中读取二进制、提取 `main.js` 并运行完整 5 处补丁与 V8 语法检查；`restore`、`disable`、`extract`、`pacman-hook --write` 分别校验各自前置条件。
 - **`extract` 目录保护**：`assertSafeTargetDir()` 显式拒绝 `/`、`$HOME`、安装根目录及其直接父目录（退出码 `2`），并对任何已存在的非空目录或非普通目录以退出码 `3` 拒绝写入。
 - **`verify` 四态启动器模型与结构化健康判定**：
   1. 启动器由 `analyseDesktopExec()` 严格归类为四态之一：`ON`（合法 `env` 前缀中含有 `AGY_UI_BUNDLE`）、`OFF`（合法 `Exec=` 行且不含该变量）、`INVALID`（启动器文件缺失、无 `Exec=`、空 `Exec=` 或含不支持的 `env -S` / 未知选项）以及初始兜底态 `UNKNOWN`；

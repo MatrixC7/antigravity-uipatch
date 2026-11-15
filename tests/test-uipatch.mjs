@@ -158,8 +158,10 @@ const SYNTH_BASELINE_SNIPPET =
 
 const SYNTH_BUNDLE = [
   SYNTH_BASELINE_SNIPPET,
-  'var I={};I.TokenType={UNSPECIFIED:0,SYSTEM_PROMPT:1,TOOLS:2,RULES:3,MCP_TOOLS:4,SKILLS:5,SUBAGENTS:6,CHAT_MESSAGES:7,WORKFLOWS:8,PLUGINS:9,FLOWS:10};I.CortexStepStatus={UNSPECIFIED:0,GENERATING:8,RUNNING:2,DONE:3}',
+  'var I={};I.TokenType={UNSPECIFIED:0,SYSTEM_PROMPT:1,TOOLS:2,RULES:3,MCP_TOOLS:4,SKILLS:5,SUBAGENTS:6,CHAT_MESSAGES:7,WORKFLOWS:8,PLUGINS:9,FLOWS:10};I.CortexStepStatus={UNSPECIFIED:0,GENERATING:8,RUNNING:2,DONE:3,ERROR:7}',
+  'var E1a={startIndex:-50},F1a={startIndex:-1},G1a={startIndex:0,endIndexExclusive:0}',
   'var $7a=a=>({optimisticState:{},trueState:{}}),$B=(a,b)=>{var c=[],{optimisticState:d,trueState:f}=$7a(a);return b.selector(f)}',
+  'async function mla(a,b,c){return a.getCascadeTrajectoryGeneratorMetadata(Wb(dia,{cascadeId:b,generatorMetadataOffset:c}))}',
   'function Hi(a,b){return(a=a.experiments[b])?!a.disabled:!1}',
   'function Ii(a,b){var c;c||(c=jh(a.stateProvider,d=>(d=d[b])?!d.disabled:!1),a.experimentEnabledProviders.set(b,c));return c}',
   'var Tla=class{constructor(a){this.lsClient=a;this.stateProvider={getState:()=>({}),setState:()=>{},dispose:()=>{}};this.flagOverrideSync=new Mla(async b=>{var c=e,d=e;try{d(await c(this.lsClient.setMendelFlagOverrides(Wb(yia,{overrides:b}))))}finally{c()}});}dispose(){Rla(this);this.stateProvider.dispose();}}',
@@ -437,6 +439,7 @@ test('hydration retries after a transient getItems failure instead of caching th
   const ctx = vm.createContext({
     E: { ExperimentWithVariantSchema: 'SchemaStub' },
     Wb: (_s, init) => ({ ...init }),
+    dia: 'GenReqSchema',
     yia: 'OverrideSchema',
     Uia: 'ReqSchema',
     B: {},
@@ -544,6 +547,7 @@ test('flagOverrideSync notifies listeners before the backend RPC settles and dis
   const ctx = vm.createContext({
     E: { ExperimentWithVariantSchema: 'SchemaStub' },
     Wb: (_s, init) => ({ ...init }),
+    dia: 'GenReqSchema',
     yia: 'OverrideSchema',
     Uia: 'ReqSchema',
     B: {},
@@ -948,6 +952,7 @@ test('R2-02: local storageService writes notify subscribers even when the RPC qu
   const ctx = vm.createContext({
     E: { ExperimentWithVariantSchema: 'SchemaStub' },
     Wb: (_s, init) => ({ ...init }),
+    dia: 'GenReqSchema',
     yia: 'OverrideSchema',
     Uia: 'ReqSchema',
     B: {},
@@ -1030,6 +1035,10 @@ test('structural anchors survive Closure Compiler identifier re-minification', (
     .replace(/var I=\{\}/g, 'var $$CxPb={}')
     .replace(/\$7a/g, '$$OptHook')
     .replace(/\$B/g, '$$ConvHook')
+    .replace(/\bE1a\b/g, '$$StepSl')
+    .replace(/\bF1a\b/g, '$$GenSl')
+    .replace(/\bG1a\b/g, '$$ExecSl')
+    .replace(/\bdia\b/g, '$$GenReqPb')
     .replace(/\bnw\./g, '$$PortalNs.')
     .replace(/\bHi\b/g, 'syncR')
     .replace(/\bIi\b/g, 'reactR')
@@ -1052,6 +1061,7 @@ test('structural anchors survive Closure Compiler identifier re-minification', (
   assert.ok(output.includes('function FlagCombo({suggestedFlags:a,onAdd:b})'));
   assert.ok(output.includes('$ReactNs.createElement(OutlineBtn,'));
   assert.ok(output.includes('$ConvHook(convId,CTX_SEL)'));
+  assert.ok(output.includes('$GenSl={startIndex:0}'));
   assert.ok(output.includes('$PortalNs.createPortal('));
   assert.doesNotThrow(() => verifyJsSyntax(output));
 });
@@ -1175,14 +1185,13 @@ test('G3: secondary Mendel channel catches errors and shares the resolver', () =
 // Context Usage & Inference Telemetry Indicator Tests
 // ---------------------------------------------------------------------------
 
-test('Context Indicator _derive computes TokenType breakdown, compaction ~, BigInt TPS/TTFT/Cache, and live streaming', () => {
+test('Context Indicator _derive computes 4x2 Last Turn & Session metrics, true cache denominator, CCPA step timestamps, and Scheme B snapshot stability', () => {
   const { output } = applyPatches(SYNTH_BUNDLE, { flags: FLAGS });
+  assert.ok(output.includes('F1a={startIndex:0}'), 'generatorMetadatas slice must start at 0');
   const ctx = vm.createContext({
-    E: {
-      ExperimentWithVariantSchema: 'SchemaStub',
-      Model: { 12: 'MODEL_GEMINI_4_CARBON', 0: 'MODEL_UNSPECIFIED' },
-    },
+    E: { ExperimentWithVariantSchema: 'SchemaStub' },
     Wb: (_s, init) => ({ ...init }),
+    dia: 'GenReqSchema',
     yia: 'OverrideSchema',
     Uia: 'ReqSchema',
     B: {},
@@ -1208,201 +1217,327 @@ test('Context Indicator _derive computes TokenType breakdown, compaction ~, BigI
   assert.equal(typeof binding?._derive, 'function');
 
   // 1. Empty / zero state returns null
-  assert.equal(binding._derive(undefined, null, 1000), null);
+  assert.equal(binding._derive(undefined), null);
   assert.equal(
-    binding._derive({ contextWindowUsage: { estimatedTokensUsed: 0, maxContextTokens: 983040 } }, null, 1000),
+    binding._derive({ contextWindowUsage: { estimatedTokensUsed: 0, maxContextTokens: 983040 } }),
     null
   );
 
-  // 2. Completed turn with BigInt usage, Vertex model path, cache hit, thinking tokens, and retry badge
-  const completed = binding._derive(
-    {
-      conversationId: 'conv-1',
-      contextWindowUsage: {
-        lastStepIndex: 3,
-        estimatedTokensUsed: 241620,
-        maxContextTokens: 983040,
-        estimatedAfterCompaction: false,
-        tokenGroups: [
-          { type: 1, numTokens: 24800 }, // SYSTEM_PROMPT
-          { type: 2, numTokens: 19620 }, // TOOLS
-          { type: 4, numTokens: 12400 }, // MCP_TOOLS
-          { type: 3, numTokens: 4000 },  // RULES
-          { type: 5, numTokens: 2400 },  // SKILLS
-          { type: 7, numTokens: 178400 }, // CHAT_MESSAGES
-        ],
-      },
-      trajectorySlice: {
-        stepsInSlice: [
-          {
-            status: 3, // DONE
-            metadata: { sourceTrajectoryStepInfo: { stepIndex: 2 } },
-            step: {
-              case: 'plannerResponse',
-              value: {
-                response: 'Done.',
-                thinkingDuration: { seconds: 4n, nanos: 900000000 },
-              },
-            },
-          },
-        ],
-        generatorMetadatasInSlice: [
-          {
-            stepIndices: [2],
-            metadata: {
-              case: 'chatModel',
-              value: {
-                responseModelFull: 'projects/p/locations/us/publishers/google/models/gemini-4-argon-b',
-                timeToFirstToken: { seconds: 1n, nanos: 140000000 },
-                streamingDuration: { seconds: 5n, nanos: 0 },
-                retries: 1,
-                retryInfos: [{ waitTime: { seconds: 2n, nanos: 100000000 } }],
-                usage: {
-                  inputTokens: 240000n,
-                  outputTokens: 4000n,
-                  thinkingOutputTokens: 3200n,
-                  responseOutputTokens: 800n,
-                  cacheReadTokens: 216000n,
-                },
-              },
-            },
-          },
-        ],
-      },
+  // 2. Multi-turn conversation (Turn 1 explicit durations + Turn 2 native CCPA step timestamps)
+  //    Also verifies `totIn = inputTokens(uncached) + cacheReadTokens + cacheWriteTokens`!
+  const multi = binding._derive({
+    conversationId: 'conv-1',
+    contextWindowUsage: {
+      lastStepIndex: 5,
+      estimatedTokensUsed: 241620,
+      maxContextTokens: 983040,
+      estimatedAfterCompaction: false,
+      tokenGroups: [
+        { type: 1, numTokens: 24800 }, // SYSTEM_PROMPT
+        { type: 2, numTokens: 19620 }, // TOOLS
+        { type: 4, numTokens: 12400 }, // MCP_TOOLS
+        { type: 3, numTokens: 4000 },  // RULES
+        { type: 5, numTokens: 2400 },  // SKILLS
+        { type: 7, numTokens: 178400 }, // CHAT_MESSAGES
+      ],
     },
-    { key: '', startMs: 0 },
-    10000
-  );
+    trajectorySlice: {
+      stepsInSlice: [
+        {
+          status: 3, // DONE (Turn 1)
+          metadata: { sourceTrajectoryStepInfo: { stepIndex: 2 } },
+          step: { case: 'plannerResponse', value: { response: 'Step 1.' } },
+        },
+        {
+          status: 3, // DONE (Turn 2 - real PROD_UI step metadata: startedAt === finishedGeneratingAt > viewableAt > createdAt!)
+          metadata: {
+            sourceTrajectoryStepInfo: { stepIndex: 5 },
+            createdAt: { seconds: 100n, nanos: 0 },
+            viewableAt: { seconds: 101n, nanos: 600000000 }, // TTFT = 1.60s
+            finishedGeneratingAt: { seconds: 104n, nanos: 220000000 }, // Decode = 2.62s, Dur = 4.22s
+            completedAt: { seconds: 104n, nanos: 220000000 },
+            startedAt: { seconds: 104n, nanos: 220000000 }, // Executor stamps startedAt AT THE END on plannerResponse!
+          },
+          step: { case: 'plannerResponse', value: { response: 'Step 2.' } },
+        },
+      ],
+      generatorMetadatasInSlice: [
+        {
+          // Turn 1: 200K total input (180K cached + 20K uncached), TTFT 1.0s, Decode 4.0s, Out 800 (Resp 200 + Think 600)
+          stepIndices: [2],
+          metadata: {
+            case: 'chatModel',
+            value: {
+              timeToFirstToken: { seconds: 1n, nanos: 0 },
+              streamingDuration: { seconds: 4n, nanos: 0 },
+              retries: 2,
+              retryInfos: [{ waitTime: { seconds: 1n, nanos: 500000000 } }],
+              usage: {
+                inputTokens: 20000n,
+                cacheReadTokens: 180000n,
+                outputTokens: 800n,
+                thinkingOutputTokens: 600n,
+                responseOutputTokens: 200n,
+              },
+            },
+          },
+        },
+        {
+          // Turn 2: real-world CCPA ratio: 6,505 uncached + 637,555 cached = 644,060 total input (~98.99% cache hit)
+          stepIndices: [5],
+          metadata: {
+            case: 'chatModel',
+            value: {
+              retries: 1,
+              retryInfos: [{ waitTime: { seconds: 2n, nanos: 100000000 } }],
+              usage: {
+                inputTokens: 6505n,
+                cacheReadTokens: 637555n,
+                outputTokens: 379n,
+                thinkingOutputTokens: 149n,
+                // responseOutputTokens omitted to test automatic `379 - 149 = 230` derivation
+              },
+            },
+          },
+        },
+      ],
+    },
+  });
 
-  assert.ok(completed);
-  assert.equal(completed.used, 241620);
-  assert.equal(completed.max, 983040);
-  assert.equal(completed.chat, 178400);
-  assert.equal(completed.sys, 63220);
-  assert.equal(completed.free, 983040 - 241620);
-  assert.equal(completed.isWarn, false);
-  assert.equal(completed.approx, false);
-  assert.deepEqual(JSON.parse(JSON.stringify(completed.groups)), [
+  assert.ok(multi);
+  assert.equal(multi.generating, false);
+  assert.equal(multi.used, 241620);
+  assert.equal(multi.chat, 178400);
+  assert.equal(multi.sys, 63220);
+  assert.deepEqual(JSON.parse(JSON.stringify(multi.groups)), [
     ['System', 24800],
     ['Tools', 19620],
     ['MCP', 12400],
     ['Rules/Skills', 6400],
   ]);
-  assert.equal(completed.t.streaming, false);
-  assert.equal(completed.t.model, 'gemini-4-argon-b');
-  assert.equal(
-    completed.t.rawModel,
-    'projects/p/locations/us/publishers/google/models/gemini-4-argon-b'
-  );
-  assert.equal(completed.t.tps, 800); // 4000 tok / 5.0s
-  assert.ok(Math.abs(completed.t.ttftSec - 1.14) < 1e-6);
-  assert.ok(Math.abs(completed.t.durSec - 6.14) < 1e-6);
-  assert.equal(completed.t.cachePct, 90);
-  assert.equal(completed.t.outTok, 4000);
-  assert.equal(completed.t.thinkTok, 3200);
-  assert.equal(completed.t.retries, 1);
-  assert.ok(Math.abs(completed.t.retryWaitSec - 2.1) < 1e-6);
 
-  // 3. Compaction detection from post-lastStepIndex non-intentOnly checkpoint + >=80% warning
-  const compacted = binding._derive(
-    {
-      contextWindowUsage: {
-        lastStepIndex: 5,
-        estimatedTokensUsed: 800000,
-        maxContextTokens: 983040,
-        tokenGroups: [],
-      },
-      trajectorySlice: {
-        stepsInSlice: [
-          {
-            status: 3, // DONE
-            metadata: { sourceTrajectoryStepInfo: { stepIndex: 6 } },
-            step: { case: 'checkpoint', value: { intentOnly: false } },
-          },
-        ],
-        generatorMetadatasInSlice: [],
-      },
-    },
-    null,
-    20000
-  );
-  assert.equal(compacted.isWarn, true);
-  assert.equal(compacted.approx, true);
+  // Verify Last Turn (Turn 2)
+  assert.equal(multi.t.totIn, 644060);
+  assert.equal(multi.t.uncachedIn, 6505);
+  assert.equal(multi.t.cacheRead, 637555);
+  assert.ok(Math.abs(multi.t.cachePct - (637555 / 644060) * 100) < 1e-6);
+  assert.ok(Math.abs(multi.t.ttftSec - 1.6) < 1e-6);
+  assert.ok(Math.abs(multi.t.durSec - 4.22) < 1e-6);
+  assert.ok(Math.abs(multi.t.inTps - 644060 / 1.6) < 1e-3);
+  assert.ok(Math.abs(multi.t.outTps - 379 / 2.62) < 1e-3);
+  assert.equal(multi.t.respTok, 230);
+  assert.equal(multi.t.outTok, 379);
+  assert.equal(multi.t.thinkTok, 149);
+  assert.equal(multi.t.retries, 1);
 
-  // 4. Live streaming estimation ignores stale prior-step GeneratorMetadata (`stepIndices: [2]`)
-  const tracker = { key: '', startMs: 0 };
-  binding._derive(
-    {
-      conversationId: 'conv-1',
-      contextWindowUsage: { lastStepIndex: 3, estimatedTokensUsed: 250000, maxContextTokens: 983040 },
-      trajectorySlice: {
-        stepsInSlice: [
-          {
-            status: 8, // GENERATING
-            metadata: { sourceTrajectoryStepInfo: { stepIndex: 5 } },
-            step: {
-              case: 'plannerResponse',
-              value: { rawThinking: 'a'.repeat(400), response: 'b'.repeat(200) },
-            },
-          },
-        ],
-        generatorMetadatasInSlice: [
-          {
-            stepIndices: [2], // Stale Turn 1 metadata!
-            metadata: {
-              case: 'chatModel',
-              value: {
-                responseModel: 'gemini-3.8-flash',
-                streamingDuration: { seconds: 5n, nanos: 0 },
-                usage: { outputTokens: 9999n },
-              },
-            },
-          },
-        ],
-      },
+  // Verify Session · 2 aggregation
+  assert.equal(multi.s.count, 2);
+  assert.equal(multi.s.totIn, 200000 + 644060);
+  assert.equal(multi.s.cacheRead, 180000 + 637555);
+  assert.equal(multi.s.uncachedIn, 20000 + 6505);
+  assert.equal(multi.s.respTok, 200 + 230);
+  assert.equal(multi.s.outTok, 800 + 379);
+  assert.equal(multi.s.thinkTok, 600 + 149);
+  assert.equal(multi.s.retries, 3);
+  assert.equal(multi.s.errs, 0);
+  assert.ok(Math.abs(multi.s.ttftSec - (1.0 + 1.6) / 2) < 1e-6);
+  assert.ok(Math.abs(multi.s.durSec - (5.0 + 4.22) / 2) < 1e-6);
+  assert.ok(Math.abs(multi.s.totalDurSec - (5.0 + 4.22)) < 1e-6);
+  assert.ok(Math.abs(multi.s.inTps - (200000 + 644060) / (1.0 + 1.6)) < 1e-3);
+  assert.ok(Math.abs(multi.s.outTps - (800 + 379) / (4.0 + 2.62)) < 1e-3);
+
+  // 3. Compaction detection + Scheme B snapshot stability during active Turn 3 (`GENERATING`)
+  const duringGen = binding._derive({
+    conversationId: 'conv-1',
+    contextWindowUsage: {
+      lastStepIndex: 5,
+      estimatedTokensUsed: 800000,
+      maxContextTokens: 983040,
+      tokenGroups: [],
     },
-    tracker,
-    50000
-  );
-  const live2 = binding._derive(
-    {
-      conversationId: 'conv-1',
-      contextWindowUsage: { lastStepIndex: 3, estimatedTokensUsed: 250000, maxContextTokens: 983040 },
-      trajectorySlice: {
-        stepsInSlice: [
-          {
-            status: 8, // GENERATING
-            metadata: { sourceTrajectoryStepInfo: { stepIndex: 5 } },
-            step: {
-              case: 'plannerResponse',
-              value: { rawThinking: 'a'.repeat(400), response: 'b'.repeat(400) },
+    trajectorySlice: {
+      stepsInSlice: [
+        {
+          status: 3, // DONE compaction checkpoint
+          metadata: { sourceTrajectoryStepInfo: { stepIndex: 6 } },
+          step: { case: 'checkpoint', value: { intentOnly: false } },
+        },
+        {
+          status: 8, // GENERATING Turn 3 in-flight!
+          metadata: {
+            sourceTrajectoryStepInfo: { stepIndex: 8 },
+            createdAt: { seconds: 200n, nanos: 0 },
+            viewableAt: { seconds: 201n, nanos: 0 },
+          },
+          step: {
+            case: 'plannerResponse',
+            value: { rawThinking: 'thinking...', response: 'partial...' },
+          },
+        },
+      ],
+      generatorMetadatasInSlice: [
+        // Turn 1 & Turn 2 completed entries remain in slice (Turn 2's step timing cached from conv-1!)
+        {
+          stepIndices: [2],
+          metadata: {
+            case: 'chatModel',
+            value: {
+              timeToFirstToken: { seconds: 1n, nanos: 0 },
+              streamingDuration: { seconds: 4n, nanos: 0 },
+              usage: { inputTokens: 20000n, cacheReadTokens: 180000n, outputTokens: 800n, responseOutputTokens: 200n, thinkingOutputTokens: 600n },
             },
           },
-        ],
-        generatorMetadatasInSlice: [
-          {
-            stepIndices: [2],
-            metadata: {
-              case: 'chatModel',
-              value: {
-                responseModel: 'gemini-3.8-flash',
-                streamingDuration: { seconds: 5n, nanos: 0 },
-                usage: { outputTokens: 9999n },
-              },
+        },
+        {
+          stepIndices: [5],
+          metadata: {
+            case: 'chatModel',
+            value: {
+              usage: { inputTokens: 6505n, cacheReadTokens: 637555n, outputTokens: 379n, thinkingOutputTokens: 149n },
             },
           },
-        ],
-      },
+        },
+        {
+          // Placeholder in-flight metadata for step 8 with zero usage
+          stepIndices: [8],
+          metadata: { case: 'chatModel', value: {} },
+        },
+      ],
     },
-    tracker,
-    52000 // +2.0s elapsed, 800 chars -> ~200 est tokens -> ~100 tok/s
+  });
+  assert.equal(duringGen.isWarn, true);
+  assert.equal(duringGen.approx, true);
+  assert.equal(duringGen.generating, true);
+  assert.equal(duringGen.s.count, 2, 'in-flight turn must not dilute Session count before completion');
+  assert.equal(duringGen.t.outTok, 379, 'Scheme B keeps Last Turn snapshot intact while Turn 3 generates');
+  assert.ok(Math.abs(duringGen.t.ttftSec - 1.6) < 1e-6, 'cached step timing survives stepsInSlice eviction');
+
+  // 4. Reopened >50-step session where Turn 1 step timing is unloaded + mid-session standalone errorMessage:
+  //    Avg speeds MUST pair only timed calls, Σ Duration marks durApprox=true, and Last Turn stays chronological
+  const reopened = binding._derive({
+    conversationId: 'conv-reopened-long',
+    contextWindowUsage: { lastStepIndex: 70, estimatedTokensUsed: 400000, maxContextTokens: 1000000 },
+    trajectorySlice: {
+      stepsSlice: { startIndex: -50 },
+      totalStepsLength: 75,
+      stepsInSlice: [
+        {
+          status: 7, // standalone errorMessage at step 60 (between Turn 1 @ step 5 and Turn 2 @ step 70)
+          metadata: { sourceTrajectoryStepInfo: { stepIndex: 60 } },
+          step: { case: 'errorMessage', value: { error: '429 Resource Exhausted' } },
+        },
+        {
+          status: 3, // DONE Turn 2 @ step 70 (loaded in -50 window)
+          metadata: {
+            sourceTrajectoryStepInfo: { stepIndex: 70 },
+            createdAt: { seconds: 500n, nanos: 0 },
+            viewableAt: { seconds: 502n, nanos: 0 }, // TTFT = 2.0s
+            finishedGeneratingAt: { seconds: 506n, nanos: 0 }, // Decode = 4.0s, Dur = 6.0s
+          },
+          step: { case: 'plannerResponse', value: { response: 'Recovered.' } },
+        },
+      ],
+      generatorMetadatasInSlice: [
+        {
+          // Turn 1 @ step 5 (unloaded from stepsInSlice, no CCPA durations on chatModel, huge 500K tokens!)
+          stepIndices: [5],
+          metadata: {
+            case: 'chatModel',
+            value: {
+              usage: { inputTokens: 50000n, cacheReadTokens: 450000n, outputTokens: 5000n, thinkingOutputTokens: 3000n },
+            },
+          },
+        },
+        {
+          // Turn 2 @ step 70 (100K total input, 400 output)
+          stepIndices: [70],
+          metadata: {
+            case: 'chatModel',
+            value: {
+              usage: { inputTokens: 10000n, cacheReadTokens: 90000n, outputTokens: 400n, thinkingOutputTokens: 100n },
+            },
+          },
+        },
+      ],
+    },
+  });
+  assert.equal(reopened.t.stepIdx, 70, 'chronological sort keeps Turn 2 @ step 70 as Last Turn after error @ step 60');
+  assert.equal(reopened.t.errs, 0);
+  assert.equal(reopened.s.count, 3, '2 chatModel calls + 1 standalone errorMessage');
+  assert.equal(reopened.s.errs, 1, 'Session accumulates mid-conversation errorMessage');
+  assert.equal(reopened.s.totIn, 500000 + 100000, 'Session sums 100% of historical tokens across unloaded steps');
+  assert.equal(reopened.s.outTok, 5000 + 400);
+  assert.equal(reopened.s.inTps, 100000 / 2.0, 'Avg In speed pairs ONLY timed Turn 2 (100K / 2s = 50K), not 600K / 2s');
+  assert.equal(reopened.s.outTps, 400 / 4.0, 'Avg Out speed pairs ONLY timed Turn 2 (400 / 4s = 100), not 5400 / 4s');
+  assert.equal(reopened.s.durSec, 6.0, 'Avg Duration averages strictly over timed calls (6.0s)');
+  assert.equal(reopened.s.timedDurCount, 1);
+
+  // 5. Real PROD_UI stream case: generatorMetadatasInSlice has chatModel wiped by TruncateGeneratorMetadataInPlace,
+  //    plus 1-attempt retryInfos must report 0 retries, and step fallback MUST still compute In speed & TTFT via createdAt!
+  const prodUiFallback = binding._derive({
+    conversationId: 'conv-produi-live',
+    contextWindowUsage: { lastStepIndex: 12, estimatedTokensUsed: 440000, maxContextTokens: 786432 },
+    trajectorySlice: {
+      stepsInSlice: [
+        {
+          status: 3,
+          metadata: {
+            sourceTrajectoryStepInfo: { stepIndex: 12 },
+            createdAt: { seconds: 1794737199n, nanos: 598000000 },
+            viewableAt: { seconds: 1794737210n, nanos: 489000000 }, // TTFT = 10.891s
+            finishedGeneratingAt: { seconds: 1794737212n, nanos: 378000000 }, // Decode = 1.889s
+            startedAt: { seconds: 1794737212n, nanos: 378000000 }, // Post-stream startedAt!
+            modelUsage: {
+              inputTokens: 2703n,
+              cacheReadTokens: 435096n,
+              outputTokens: 359n,
+              thinkingOutputTokens: 152n,
+              responseOutputTokens: 207n,
+            },
+          },
+          step: { case: 'plannerResponse', value: { response: 'OK.' } },
+        },
+      ],
+      generatorMetadatasInSlice: [
+        {
+          // Truncated PROD_UI metadata: chatModel wiped to undefined!
+          stepIndices: [12],
+          plannerConfig: { planModel: 1427 },
+        },
+      ],
+    },
+  });
+  assert.ok(prodUiFallback.t);
+  assert.ok(Math.abs(prodUiFallback.t.ttftSec - 10.891) < 1e-3, 'must use createdAt when startedAt >= viewableAt');
+  assert.ok(prodUiFallback.t.inTps > 40000, 'In speed must be non-zero (>40K t/s) on PROD_UI step fallback');
+  assert.ok(Math.abs(prodUiFallback.t.durSec - 12.78) < 1e-3);
+
+  // Also verify rpcGens override with single-attempt retryInfos (retries=0, retryInfos.length=1 -> 0 retries!)
+  const withRpcGens = binding._derive(
+    {
+      conversationId: 'conv-produi-live',
+      contextWindowUsage: { lastStepIndex: 12, estimatedTokensUsed: 440000, maxContextTokens: 786432 },
+      trajectorySlice: { stepsInSlice: [], generatorMetadatasInSlice: [] },
+    },
+    [
+      {
+        stepIndices: [12],
+        metadata: {
+          case: 'chatModel',
+          value: {
+            retries: 0,
+            retryInfos: [{ usage: {} }], // 1 attempt = 0 retries!
+            timeToFirstToken: { seconds: 2n, nanos: 0 },
+            streamingDuration: { seconds: 3n, nanos: 0 },
+            usage: { inputTokens: 5000n, cacheReadTokens: 195000n, outputTokens: 300n, responseOutputTokens: 200n, thinkingOutputTokens: 100n },
+          },
+        },
+      },
+    ]
   );
-  assert.equal(live2.t.streaming, true);
-  assert.equal(live2.t.tpsApprox, true);
-  assert.equal(live2.t.model, 'gemini-3.8-flash', 'keeps conversation model badge stable');
-  assert.equal(live2.t.outTok, 200, 'must NOT leak stale 9999 outputTokens from step 2');
-  assert.equal(live2.t.thinkTok, 100);
-  assert.equal(live2.t.tps, 100);
+  assert.equal(withRpcGens.t.retries, 0, 'single-attempt retryInfos entry must NOT count as a retry');
+  assert.equal(withRpcGens.t.ttftSec, 2.0);
+  assert.equal(withRpcGens.t.inTps, 100000);
 });
 
 test('PATCH_CONTEXT_INDICATOR supports custom override, polyfill bypass, stock passthrough, and native fallback', () => {
@@ -1494,7 +1629,7 @@ test('__agyBindStorage seeds contextUsageIndicatorEnabled=true once when unset a
   assert.equal(diskStore.contextUsageIndicatorEnabled, 'false');
 });
 
-test('Context Indicator React component renders cleanly across empty/active/open states and persists Pin t/s toggle', async () => {
+test('Context Indicator React component renders cleanly across empty/active/open states and persists t/s [Off | Turn | Avg] mode', async () => {
   const { output } = applyPatches(SYNTH_BUNDLE, { flags: FLAGS });
   const diskStore = {};
   let currentConvState = { agentState: undefined };
@@ -1562,6 +1697,7 @@ test('Context Indicator React component renders cleanly across empty/active/open
     __testConvState: currentConvState,
     E: { ExperimentWithVariantSchema: 'SchemaStub', Model: {} },
     Wb: (_s, init) => ({ ...init }),
+    dia: 'GenReqSchema',
     yia: 'OverrideSchema',
     Uia: 'ReqSchema',
     B: mockReact,
@@ -1615,6 +1751,25 @@ test('Context Indicator React component renders cleanly across empty/active/open
         generatorMetadatasInSlice: [
           {
             stepIndices: [1],
+            error: 'Transient upstream error',
+            metadata: {
+              case: 'chatModel',
+              value: {
+                timeToFirstToken: { seconds: 1n, nanos: 0 },
+                streamingDuration: { seconds: 62n, nanos: 0 },
+                retries: 2,
+                usage: {
+                  inputTokens: 100n,
+                  cacheReadTokens: 299900n, // 299900 / 300000 = 99.966% -> capped at 99.9% (never fake 100.0%)
+                  outputTokens: 1500n,
+                  thinkingOutputTokens: 1000n,
+                  responseOutputTokens: 500n,
+                },
+              },
+            },
+          },
+          {
+            stepIndices: [3],
             metadata: {
               case: 'chatModel',
               value: {
@@ -1622,10 +1777,11 @@ test('Context Indicator React component renders cleanly across empty/active/open
                 timeToFirstToken: { seconds: 1n, nanos: 0 },
                 streamingDuration: { seconds: 2n, nanos: 0 },
                 usage: {
-                  inputTokens: 200000n,
+                  inputTokens: 20000n,
+                  cacheReadTokens: 180000n, // 180K / 200K = 90.0%
                   outputTokens: 150n,
                   thinkingOutputTokens: 100n,
-                  cacheReadTokens: 180000n,
+                  responseOutputTokens: 50n,
                 },
               },
             },
@@ -1639,26 +1795,76 @@ test('Context Indicator React component renders cleanly across empty/active/open
   const trigBtn = findNodes(rClosed.tree, (n) => n.props?.['data-testid'] === 'agy-context-usage-indicator')[0];
   assert.ok(trigBtn);
   assert.equal(textOf(trigBtn), '25%');
+  assert.ok(
+    trigBtn.props.className.includes('h-7') &&
+      trigBtn.props.className.includes('text-sm') &&
+      trigBtn.props.className.includes('rounded-full'),
+    'trigger button aligns with official h-7 text-sm rounded-full composer toolbar pills'
+  );
+  const trigSvg = findNodes(trigBtn, (n) => n.type === 'svg')[0];
+  assert.equal(trigSvg?.props?.width, 16);
+  assert.ok(trigSvg?.props?.className?.includes('w-4 h-4'));
 
-  // 3. Click trigger + set pos -> opens dialog with model badge, 3x2 grid, and Pin t/s button
+  // 3. Click trigger + set pos -> opens dialog with stacked Last Turn & Session · 2 4x2 grids, Avg/Σ prefixes, no model badge
   trigBtn.props.onClick();
-  states[4] = { position: 'fixed', zIndex: 9999, right: '16px', bottom: '48px' }; // `pos` state slot
+  states[3] = { position: 'fixed', zIndex: 9999, right: '16px', bottom: '48px' }; // `pos` state slot
   const rOpen = renderOnce(Indicator);
   assert.equal(rOpen.hooksUsed, rEmpty.hooksUsed, 'hook count must stay invariant when popover opens');
   const dialog = findNodes(rOpen.tree, (n) => n.props?.role === 'dialog')[0];
   assert.ok(dialog);
   const fullText = textOf(dialog);
-  assert.ok(fullText.includes('gemini-4-argon-b'));
-  assert.ok(fullText.includes('75.0 tok/s'));
-  assert.ok(fullText.includes('90%'));
+  assert.equal(fullText.includes('gemini-4-argon-b'), false, 'model badge must be removed');
+  assert.ok(fullText.includes('Last Turn'));
+  assert.ok(fullText.includes('\u03a3 Session \u00b7 2 turns'));
+  assert.ok(fullText.includes('200.0K t/s'), 'Last Turn In speed = 200K / 1.0s');
+  assert.ok(fullText.includes('75.0 t/s'), 'Last Turn Out speed = 150 / 2.0s');
+  assert.ok(fullText.includes('90.0%'), 'Last Turn Cache hit formatted to 1 decimal place');
+  assert.ok(fullText.includes('96.0%'), 'Session Cache hit = 479.9K / 500K = 95.98% -> 96.0%');
+  assert.ok(fullText.includes('33.0s'), 'Session Avg Duration = (63s + 3s) / 2 = 33.0s');
+  assert.ok(
+    fullText.indexOf('\u03a3Input') < fullText.indexOf('\u03a3Cache hit') &&
+      fullText.indexOf('\u03a3Cache hit') < fullText.indexOf('AvgIn speed') &&
+      fullText.indexOf('AvgIn speed') < fullText.indexOf('AvgDuration'),
+    '1A matrix order: top 2 rows Σ (Input/Output, Cache hit/Response), bottom 2 rows Avg (In speed/Out speed, TTFT/Duration)'
+  );
+  assert.ok(fullText.includes('! 1 error') && fullText.includes('\u21bb 2 retries'), 'Session aggregates errors & retries');
 
-  // 4. Click "Pin t/s" button -> persists preference to nativeStorage & updates bottom trigger to "25% · 75 t/s"
-  const pinBtn = findNodes(dialog, (n) => n.type === 'button' && textOf(n).includes('Pin t/s'))[0];
-  assert.ok(pinBtn);
-  pinBtn.props.onClick();
-  assert.equal(diskStore['agy.uipatch.indicatorPinTps'], 'true');
+  // 4. Segmented t/s control [Off | Turn | Avg] persists mode to nativeStorage & switches cleanly between Turn (75 t/s), Avg (26 t/s), and Off
+  const modeGroup = findNodes(dialog, (n) => n.props?.role === 'group' && n.props?.['aria-label'] === 'Bottom toolbar output speed mode')[0];
+  assert.ok(modeGroup, '3-state t/s segmented group must render in header');
+  const segBtns = findNodes(modeGroup, (n) => n.type === 'button');
+  assert.deepEqual(segBtns.map((b) => textOf(b)), ['Off', 'Turn', 'Avg']);
+  assert.equal(segBtns[0].props['aria-pressed'], true);
 
-  const rPinned = renderOnce(Indicator);
-  const trigAfter = findNodes(rPinned.tree, (n) => n.props?.['data-testid'] === 'agy-context-usage-indicator')[0];
-  assert.equal(textOf(trigAfter), '25% \u00b7 75 t/s');
+  // Switch to Turn -> Last Turn Out speed (150 / 2.0s = 75 t/s)
+  segBtns[1].props.onClick();
+  assert.equal(diskStore['agy.uipatch.indicatorPinTps'], 'turn');
+  const rTurn = renderOnce(Indicator);
+  const trigTurn = findNodes(rTurn.tree, (n) => n.props?.['data-testid'] === 'agy-context-usage-indicator')[0];
+  assert.equal(textOf(trigTurn), '25% \u00b7 75 t/s');
+
+  // Switch to Avg -> Session Avg Out speed (1650 / 64s = 25.8 -> 26 t/s)
+  const dialogTurn = findNodes(rTurn.tree, (n) => n.props?.role === 'dialog')[0];
+  const avgBtn = findNodes(dialogTurn, (n) => n.type === 'button' && textOf(n) === 'Avg')[0];
+  avgBtn.props.onClick();
+  assert.equal(diskStore['agy.uipatch.indicatorPinTps'], 'avg');
+  const rAvg = renderOnce(Indicator);
+  const trigAvg = findNodes(rAvg.tree, (n) => n.props?.['data-testid'] === 'agy-context-usage-indicator')[0];
+  assert.equal(textOf(trigAvg), '25% \u00b7 26 t/s');
+
+  // Legacy boolean "true" stored in diskStore migrates cleanly to "avg", and clicking "Off" returns to percentage-only
+  diskStore['agy.uipatch.indicatorPinTps'] = 'true';
+  const rLegacy = renderOnce(Indicator);
+  assert.equal(
+    textOf(findNodes(rLegacy.tree, (n) => n.props?.['data-testid'] === 'agy-context-usage-indicator')[0]),
+    '25% \u00b7 26 t/s'
+  );
+  const offBtn = findNodes(findNodes(rLegacy.tree, (n) => n.props?.role === 'dialog')[0], (n) => n.type === 'button' && textOf(n) === 'Off')[0];
+  offBtn.props.onClick();
+  assert.equal(diskStore['agy.uipatch.indicatorPinTps'], 'off');
+  const rOff = renderOnce(Indicator);
+  assert.equal(
+    textOf(findNodes(rOff.tree, (n) => n.props?.['data-testid'] === 'agy-context-usage-indicator')[0]),
+    '25%'
+  );
 });
