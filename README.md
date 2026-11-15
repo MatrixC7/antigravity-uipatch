@@ -115,7 +115,7 @@ sudo node ~/antigravity-uipatch/antigravity_uipatch.mjs restore --user "$USER"
 |---|---|
 | **[《原理与使用指南》](docs/overview-and-guide.md)** | 三层架构通俗导读、**上下文与输出速率指示器各指标定义与实机现象问答**（完成态快照、Prefix KV 缓存分母、`TTFT` 与上下文长度、工具调用突发 `Out speed`、双列表懒加载） |
 | **[《实验特性开关全景目录》](docs/custom-flags-catalog.md)** | 全部 **107 项 `customFlag`** 与 **23 个直读实验键**的线上基线状态、推荐加分项与避坑提醒 |
-| **[《CLI 命令参考、安全机制与支持契约》](docs/cli-and-support-scope.md)** | 全部子命令与全局选项、验证与扫描工具（`verify_live.mjs` / `inspect_flags.mjs` / 44 项单测）、安全边界与退出码契约 |
+| **[《CLI 命令参考、安全机制与支持契约》](docs/cli-and-support-scope.md)** | 全部子命令与全局选项、验证与扫描工具（`verify_live.mjs` / `inspect_flags.mjs` / 离线单测套件）、安全边界与退出码契约 |
 | **[《补丁架构与脚本实现详解》](docs/patch-internals.md)** | 尾部追加式无损 ASAR 打包、内嵌 ZIP 解析、`main.js` 五处结构化汇聚点补丁与 `language_server` 遥测逆向细节 |
 | **[《Mendel 门控取证报告》](docs/mechanism-mendel-gating.md)** | 前端三轨门控调用链、Google OAuth 384 项线上快照对比、8 条候选注入路径实测与 Electron Fuses 分析 |
 

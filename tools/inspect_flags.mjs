@@ -7,13 +7,14 @@
  * zero disk modifications) and inventories every frontend experiment gate:
  *   1. `FeatureManagerV2` `customFlag` gates (literal + parameter-passed) and
  *      direct `customFlags.includes(...)` checks, mapped to gated feature keys.
- *   2. Direct `MendelExperimentProvider` & secondary Mendel readers:
- *      - `kj(provider, flag)`     : reactive boolean providers (default false upstream)
- *      - `IX(flag)`               : `kj` reactive boolean hook wrapper
- *      - `jj(provider, flag)`     : synchronous boolean checks
- *      - `FS(flag)`               : secondary `getMendelFlags` boolean hook
- *      - `GS(flag, defaultInt)`   : secondary `getMendelFlags` integer payload hook
- *      - `mj(flag)`               : string payload providers
+ *   2. Direct `MendelExperimentProvider` & secondary Mendel readers (resolved
+ *      dynamically by structural signature; 2.31 symbols shown as examples):
+ *      - `Ii(provider, flag)`     : reactive boolean providers (default false upstream)
+ *      - `CKc(flag)`              : `Ii` reactive boolean hook wrapper
+ *      - `Hi(provider, flag)`     : synchronous boolean checks
+ *      - `IT(flag)`               : secondary `getMendelFlags` boolean hook
+ *      - `JT(flag, defaultInt)`   : secondary `getMendelFlags` integer payload hook
+ *      - `Ji(flag)`               : string payload providers
  *      - `.experiments["..."]`    : raw experiment map lookups
  *
  * Usage:

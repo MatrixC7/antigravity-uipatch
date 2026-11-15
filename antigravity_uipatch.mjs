@@ -50,16 +50,19 @@
  *    - `mendel-local-overrides`: binds `clientStorageFeature` (`hhd()`) and
  *      `flagOverrideSync` (`Mla`) so direct Mendel boolean readers (`Hi`, `Ii`,
  *      `IT`) honor bidirectional `customFlagOverrides` toggles immediately
- *      without mutating `baselineRuntimeEnvironment`.
+ *      without mutating `baselineRuntimeEnvironment`, exposes `lsClient` as
+ *      `globalThis.__agyLsClient` for lightweight telemetry hydration, and seeds
+ *      `contextUsageIndicatorEnabled="true"` once when unset.
  *    - `flag-picker-scrollable`: replaces the flag picker (`EGb()`) unscrollable,
  *      unthemed Chromium `<datalist>` popup with an upward-opening (`bottom-full mb-1`),
  *      scrollable (`max-h-64 overflow-y-auto`), keyboard-navigable ARIA combobox.
- *    - `context-usage-indicator`: mounts a clean-room Context Window & Last-Turn
- *      Inference Telemetry indicator (`__AgyContextIndicator`) into the host
- *      `buildBindings.contextUsageIndicator` slot (stripped to `void 0` in 2.30+
- *      external builds), displaying `TokenType` sub-group breakdown, actual
- *      backend `responseModel`, output `TPS` (with optional toolbar pin toggle),
- *      `TTFT`, `Cache hit`, `Duration`, `Output`, `Thinking` tokens, and retry badges.
+ *    - `context-usage-indicator`: mounts the Context Window & Inference Telemetry
+ *      indicator (`__AgyContextIndicator`) into `buildBindings.contextUsageIndicator`
+ *      (stripped to `void 0` in 2.30+ external builds), displaying `TokenType`
+ *      sub-group breakdown, `Last Turn` and `Σ Session · N turns` `4x2` matrices
+ *      (`Input`/`Output`, `Cache hit`/`Response`, `In speed`/`Out speed`,
+ *      `TTFT`/`Duration`), error/retry badges, and a `t/s [Off | Turn | Avg]`
+ *      bottom-toolbar switch.
  * 3. Runtime activation (`AGY_UI_BUNDLE=<ui-dir>`):
  *    passed manually by the user via `.desktop` launcher or terminal environment.
  *
@@ -70,7 +73,6 @@
  *   sync          post-upgrade full re-sync for Pacman hooks (supports --user, --quiet)
  *   repair        re-extract & re-patch Web UI from current language_server without touching ASAR
  *   verify        report build CL, hook/UI states, backup pairing & optional launcher status (alias: status)
- *   disable       remove AGY_UI_BUNDLE from .desktop launcher if configured
  *   restore       atomically restore paired pristine app.asar (alias: uninstall)
  *   extract       dump unpatched stock Web UI from language_server to a directory
  *   pacman-hook   print or write a root-safe Pacman PostTransaction hook
@@ -88,8 +90,9 @@
  *    symlink below the root is rejected (`assertNoSymlinkBelowRoot()`); the
  *    root-owned Pacman hook audit (`auditRootOwnedChain()`) rejects symlinks
  *    anywhere in the lexical path and verifies ownership up the `realpath` chain.
- * 5. Desktop `Exec=` handling shares a single `analyseDesktopExec()` parser
- *    across patch/unpatch/verify with two-layer encoding (`Exec` argv -> `KeyFile`).
+ * 5. Optional `.desktop` `Exec=` inspection (`analyseDesktopExec()`) is strictly
+ *    read-only and decodes two-layer `GKeyFile` -> `Exec` argv escaping to
+ *    auto-detect user-configured `AGY_UI_BUNDLE` paths in `repair` and `verify`.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -2368,27 +2371,14 @@ export function verifyJsSyntax(code, filename = 'main.js') {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Desktop Launcher Pure Text Helpers
+// 4. Desktop Launcher Read-Only `Exec=` Parser
 // ---------------------------------------------------------------------------
 
 /**
- * Encode a value for the **KeyFile string layer** (the `=` value of a key in a
- * `.desktop` file).
- *
- * A `.desktop` file is a GKeyFile: when writing `Exec=`, each argument is first
- * quoted at the Exec argv layer (`desktopExecEscapeArg`) and joined, and the
- * resulting string is then escaped here for the KeyFile layer (`\` doubled,
- * leading space written as `\s`). Reading reverses the two layers in the
- * opposite order (`keyFileUnescapeValue` -> `tokenizeDesktopExec`). Without
- * this outer layer, paths containing `"`, `$` or a backtick are rejected by GLib/Gio.
+ * Unescape a value at the **GKeyFile string layer** (the `=` right-hand side of
+ * a key in a `.desktop` file: `\\` -> `\`, `\s` -> leading space, `\n`, `\r`, `\t`),
+ * prior to Desktop Entry `Exec` argv tokenization.
  */
-export function keyFileEscapeValue(value) {
-  let out = String(value).replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
-  if (out.startsWith(' ')) out = `\\s${out.slice(1)}`;
-  return out;
-}
-
-/** Inverse of `keyFileEscapeValue()`. */
 export function keyFileUnescapeValue(value) {
   let out = '';
   const s = String(value);
@@ -2406,24 +2396,6 @@ export function keyFileUnescapeValue(value) {
     out += s[i];
   }
   return out;
-}
-
-/**
- * Quote a single Desktop Entry `Exec` argument (the Exec-level layer only).
- *
- * This follows the freedesktop Desktop Entry spec, which is NOT shell quoting:
- * a token is wrapped in double quotes only when it contains whitespace or a
- * reserved character, and inside quotes only `"`, `` ` ``, `$` and `\` are
- * backslash-escaped. A literal `%` must be doubled (`%%`) so it is not read as
- * a field code. The whole `NAME=value` assignment is quoted as one token so
- * `env` receives it as a single argv element.
- *
- * Callers writing a file must additionally apply `keyFileEscapeValue()`.
- */
-export function desktopExecEscapeArg(value) {
-  const doubled = String(value).replace(/%/g, '%%');
-  if (!/[\s"'\\`$<>~|&;*?#()[\]{}]/.test(doubled)) return doubled;
-  return `"${doubled.replace(/(["\\`$])/g, '\\$1')}"`;
 }
 
 /**
@@ -2492,23 +2464,18 @@ export function unquoteDesktopExecToken(raw) {
 }
 
 /**
- * Parse a Desktop Entry `Exec=` line into the structure needed to safely
- * rewrite one environment assignment.
- *
- * This is the single parser shared by `patchDesktopText`,
- * `unpatchDesktopText` and `verify`, so reading and writing can never disagree
- * about what the line means.
+ * Read-only parser for a Desktop Entry `Exec=` line, shared by `makePaths()`
+ * and `verify` to detect a user-configured `AGY_UI_BUNDLE=<dir>` assignment.
  *
  * Modelled `env` semantics:
  * - a leading `env` or `/usr/bin/env` token introduces an environment prefix;
  * - options come BEFORE assignments; `-u`/`--unset`/`-C`/`--chdir` consume an
  *   argument, `-i`/`--ignore-environment`/`-0`/`--null`/`-v`/`--debug` do not;
- * - every `NAME=value` before the program token is an environment assignment and
- *   all of them are preserved (later ones win);
+ * - every `NAME=value` before the program token is an environment assignment
+ *   (later ones win);
  * - `--` terminates option parsing;
  * - the first non-option token that is not an assignment is the program; any
- *   `NAME=value` after it is a plain argument and must never be treated as an
- *   environment variable nor deleted.
+ *   `NAME=value` after it is a plain argument and is never read as an env var.
  *
  * Unsupported forms (`-S`, `--split-string`, unknown wrappers) are reported via
  * `unsupported` instead of being guessed at.
@@ -2625,100 +2592,6 @@ export function parseLauncherAssignment(desktopText, envVar = ENV_VAR) {
     value: a.value,
     unsupported: a.unsupported,
     ok: a.ok,
-  };
-}
-
-/**
- * Rewrite (or insert) our single `NAME=value` assignment in an Exec line.
- *
- * The line is decoded (KeyFile → Exec tokens), the assignment is replaced or
- * inserted at the correct env position (after options, before the program), and
- * the whole line is re-encoded (Exec → KeyFile). Every other assignment and
- * argument is preserved verbatim.
- */
-export function patchDesktopText(text, uiDir, envVar = ENV_VAR) {
-  const line = /^Exec=(.*)$/m.exec(text);
-  if (!line) throw new PatchError('.desktop file has no Exec= line', 1);
-
-  const info = analyseDesktopExec(text, envVar);
-  if (!info.ok) {
-    throw new PatchError(
-      `cannot safely rewrite this launcher (${info.unsupported}); refusing to guess. ` +
-        `Rewrite Exec= to use a plain command or \`env NAME=value command\`.`,
-      3
-    );
-  }
-  if (info.tokens.length === 0) throw new PatchError('.desktop Exec= line is empty', 1);
-
-  // Work on RAW tokens so every untouched argument keeps its original quoting.
-  const assignmentToken = desktopExecEscapeArg(`${envVar}=${uiDir}`);
-  const raw = info.rawTokens.slice();
-  let next;
-
-  if (info.usesEnv) {
-    const existingIdx = raw.findIndex(
-      (rawTok, idx) =>
-        idx > 0 && idx < info.programIndex && rawTok && info.tokens[idx].startsWith(`${envVar}=`)
-    );
-    if (existingIdx >= 0) {
-      raw[existingIdx] = assignmentToken;
-    } else {
-      // Insert as the FIRST assignment so it sits after options, before program.
-      const insertAt = info.assignmentIndexes.length ? info.assignmentIndexes[0] : info.programIndex;
-      raw.splice(insertAt, 0, assignmentToken);
-    }
-    next = raw;
-  } else {
-    // No existing `env` prefix: prepend one so the variable reaches the process.
-    next = [desktopExecEscapeArg('env'), assignmentToken, ...raw];
-  }
-
-  const execValue = next.join(' ');
-  if (keyFileEscapeValue(execValue) === line[1]) return { text, changed: false };
-  return {
-    text: text.replace(line[0], `Exec=${keyFileEscapeValue(execValue)}`),
-    changed: true,
-  };
-}
-
-/**
- * Remove our assignment from an Exec line, preserving every other token.
- *
- * Only the assignment inside the env prefix is considered; a same-shaped
- * argument after the program token is left untouched.
- */
-export function unpatchDesktopText(text, envVar = ENV_VAR) {
-  const line = /^Exec=(.*)$/m.exec(text);
-  if (!line) return { text, changed: false };
-
-  const info = analyseDesktopExec(text, envVar);
-  if (!info.ok || !info.usesEnv) return { text, changed: false };
-
-  const raw = info.rawTokens.slice();
-  const idx = raw.findIndex(
-    (rawTok, i) => i > 0 && i < info.programIndex && info.tokens[i].startsWith(`${envVar}=`)
-  );
-  if (idx < 0) return { text, changed: false };
-  raw.splice(idx, 1);
-
-  // Decide whether the leading `env` is still needed. It can only be dropped
-  // when nothing after it was ever `env`'s business — i.e. the token right after
-  // it is the program itself. If options (or other assignments) remain, dropping
-  // `env` would turn those options into the command line, which is a behaviour
-  // change, so `env` is kept.
-  if (info.tokens[0] === 'env' || info.tokens[0].endsWith('/env')) {
-    const remainingValues = info.tokens.filter((_v, i) => i !== idx);
-    const nextValue = remainingValues[1];
-    const hadOptions = info.programIndex > 1 + info.assignmentIndexes.length;
-    if (!hadOptions && nextValue !== undefined && !ENV_ASSIGNMENT_RE.test(nextValue)) {
-      raw.shift();
-    }
-  }
-
-  const execValue = raw.join(' ');
-  return {
-    text: text.replace(line[0], `Exec=${keyFileEscapeValue(execValue)}`),
-    changed: true,
   };
 }
 
@@ -2871,7 +2744,6 @@ function makePaths(opts = {}) {
     unpacked: path.join(installDir, 'resources', 'app.asar.unpacked'),
     lsBinary: path.join(installDir, 'resources', 'bin', 'language_server'),
     desktop,
-    sysDesktop: '/usr/share/applications/antigravity.desktop',
     ui: ui || defaultUi,
     uiSource: uiSource || 'default',
     backup: path.join(acct.home, '.local/share/antigravity-uipatch-backup'),
@@ -2902,35 +2774,10 @@ function readLsStamp(lsBinaryPath) {
   }
 }
 
-function refreshDesktopCache(account) {
-  let ok = false;
-  try {
-    if (process.getuid?.() === 0 && account.user) {
-      execFileSync(
-        'runuser',
-        ['-u', account.user, '--', 'env', `HOME=${account.home}`, 'kbuildsycoca6', '--noincremental'],
-        { stdio: 'ignore', timeout: 15000 }
-      );
-    } else {
-      execFileSync('kbuildsycoca6', ['--noincremental'], { stdio: 'ignore', timeout: 15000 });
-    }
-    ok = true;
-  } catch {}
-  try {
-    execFileSync(
-      'update-desktop-database',
-      [path.join(account.home, '.local/share/applications')],
-      { stdio: 'ignore', timeout: 10000 }
-    );
-  } catch {}
-  return ok;
-}
-
-function reclaimUserOwnership(paths, { includeDesktop = false } = {}) {
+function reclaimUserOwnership(paths) {
   if (process.getuid?.() !== 0 || !paths.account.user) return null;
   const spec = `${paths.account.uid}:${paths.account.gid}`;
-  const rawTargets = includeDesktop ? [paths.ui, paths.backup, paths.desktop] : [paths.ui, paths.backup];
-  const targets = rawTargets.filter((p) => fs.existsSync(p));
+  const targets = [paths.ui, paths.backup].filter((p) => fs.existsSync(p));
   for (const t of targets) {
     try {
       execFileSync('chown', ['-R', spec, t], { stdio: 'ignore' });
@@ -3597,29 +3444,6 @@ function cmdVerify(opts) {
   return asarHooked && uiOk ? 0 : 1;
 }
 
-function cmdDisable(opts) {
-  const paths = makePaths(opts);
-  if (!fs.existsSync(paths.desktop)) {
-    say(C.dim('Launcher file does not exist; nothing to disable.'));
-    return 0;
-  }
-  const raw = fs.readFileSync(paths.desktop, 'utf8');
-  const { text, changed } = unpatchDesktopText(raw, ENV_VAR);
-  if (!changed) {
-    say(C.dim('Launcher switch is already off.'));
-    return 0;
-  }
-  if (opts.dryRun) {
-    say(`dry-run: would remove ${ENV_VAR} from ${paths.desktop}`);
-    return 0;
-  }
-  atomicWriteFile(paths.desktop, text, { mode: 0o600 });
-  refreshDesktopCache(paths.account);
-  reclaimUserOwnership(paths, { includeDesktop: true });
-  say(C.ok('Launcher switch removed. Restart Antigravity to use stock built-in UI.'));
-  return 0;
-}
-
 function cmdRestore(opts) {
   const paths = makePaths(opts);
   const bakAsar = path.join(paths.backup, 'app.asar.orig');
@@ -3869,7 +3693,6 @@ Commands:
   sync                  Post-upgrade full sync for Pacman hooks (refreshes backup, hook & Web UI)
   repair                Re-extract & re-patch Web UI from current language_server only
   verify                Show engine CL, hook/UI states, backup pairing & launcher status (alias: status)
-  disable               Remove AGY_UI_BUNDLE from .desktop launcher if present
   restore               Atomically restore paired pristine app.asar (alias: uninstall)
   extract [dir]         Extract unpatched stock Web UI into a new or empty directory
   pacman-hook           Print (or --write <file>) a root-safe Pacman PostTransaction hook
@@ -3969,8 +3792,6 @@ export function main(argv = process.argv.slice(2)) {
       case 'verify':
       case 'status':
         return cmdVerify(opts);
-      case 'disable':
-        return cmdDisable(opts);
       case 'restore':
       case 'uninstall':
         return cmdRestore(opts);

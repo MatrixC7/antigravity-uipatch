@@ -97,7 +97,7 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 
 ## 2. 上下文容量与推理遥测面板（`Context & Inference Indicator`）读数指南与设计解惑
 
-在 `antigravity 2.30+ / 2.31` 外部发行版中，Google 将入口插槽 `buildBindings.contextUsageIndicator` 置为了 `void 0` 并剔除了原版组件代码。本工具通过洁净室原创组件 `__AgyContextIndicator` 恢复并大幅增强了输入框右下角的上下文圆环指示器（同时自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 外观开关）。
+在 `antigravity 2.30+ / 2.31` 外部发行版中，Google 将入口插槽 `buildBindings.contextUsageIndicator` 置为了 `void 0` 并剔除了原版组件代码。本工具挂载了增强指示器组件 `__AgyContextIndicator`，在输入框右下角提供上下文占用圆环与推理速率展示（同时自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 外观开关）。
 
 ### 2.1 面板结构一览与二维正交矩阵设计
 
@@ -202,7 +202,7 @@ Avg TTFT           1.74s   Avg Duration             4.08s
 | **未灰度实验项（如 `fileExplorerTab`）** | 隐藏 | 隐藏 | **可在 `Developer` 面板按需添加** |
 | **手动修改开关的作用范围与持久化** | — | 面板隐藏；直读开关因 `SetMendelFlagOverrides` 权限拒绝无法本地覆盖 | **全通道实时响应覆盖，保存于 `~/.config/Antigravity/app_storage.json`，重启与重装均保留** |
 | **网络抖动时的实验表** | — | 原版主入口在失败时返回 `undefined`，下游保留已加载的表 | **主/次双通道在请求失败时均保留 last-known-good；服务端成功返回空表时清空旧缓存并采用静态基线** |
-| **上下文容量与推理遥测指示器** | `2.30+` 外部包已剥离为 `void 0` | `2.30+` 外部包已剥离为 `void 0` | **开箱默认挂载洁净室增强版（展示 `TokenType` 细分，以及 `Last Turn` 与 `Σ Session · N turns` 双 `4×2` 遥测：`Input`/`Output`/`Cache hit`/`Response`/`In speed`/`Out speed`/`t/s [Off\|Turn\|Avg]`/`TTFT`/`Duration` 与报错重试角标）** |
+| **上下文容量与推理遥测指示器** | `2.30+` 外部包已剥离为 `void 0` | `2.30+` 外部包已剥离为 `void 0` | **开箱默认挂载增强版指示器（展示 `TokenType` 细分，以及 `Last Turn` 与 `Σ Session · N turns` 双 `4×2` 遥测：`Input`/`Output`/`Cache hit`/`Response`/`In speed`/`Out speed`/`t/s [Off\|Turn\|Avg]`/`TTFT`/`Duration` 与报错重试角标）** |
 | **开关候选框滚动体验** | — | 原生 `<datalist>` 弹窗白底且**无法滚动** | **深色主题向上展开，支持滚轮 / 键盘导航 / 自动滚动入视区，含 ARIA listbox 语义** |
 | **误删/误覆盖防护** | — | — | **`--dry-run` 绝对零写入；`extract` 拒绝非空目录；UI 切换双失败时保留旧副本并给出恢复路径** |
 | **是否修改 `language_server` 二进制** | 否 | 否 | **否**（纯内存只读提取内嵌 ZIP） |

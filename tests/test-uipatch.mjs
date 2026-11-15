@@ -3,10 +3,11 @@
  * Offline unit tests for `antigravity_uipatch.mjs`.
  *
  * Never modifies the installed Antigravity files. Exercises ASAR round-tripping,
- * pure `node:zlib` ZIP extraction & CRC32 safety, all 4 UI patches (including
+ * pure `node:zlib` ZIP extraction & CRC32 safety, all 5 UI patches (including
  * live VM execution of Google Native Mendel baseline, bidirectional local override
- * semantics, and cross-port `nativeStorage` persistence), backup pairing invariants,
- * `.desktop` editing, and atomic write guards.
+ * semantics, cross-port `nativeStorage` persistence, and Context & Inference
+ * Indicator), backup pairing invariants, read-only `.desktop` `Exec=` parsing,
+ * and atomic write guards.
  *
  * Run:
  *   node --test tests/
@@ -42,13 +43,11 @@ import {
   ensurePairedBackup,
   extractZipToDir,
   findWebBundleZip,
-  keyFileEscapeValue,
   keyFileUnescapeValue,
   parseLauncherAssignment,
   listZipEntries,
   pairsWith,
   patchAsarBuffer,
-  patchDesktopText,
   readAsar,
   readEntry,
   readZipEntry,
@@ -56,7 +55,6 @@ import {
   resolveWriteRoot,
   sha256,
   tokenizeDesktopExec,
-  unpatchDesktopText,
   unquoteDesktopExecToken,
   verifyJsSyntax,
 } from '../antigravity_uipatch.mjs';
@@ -606,18 +604,14 @@ test('flagOverrideSync notifies listeners before the backend RPC settles and dis
   assert.equal(setStateCalls, beforeDispose, 'disposed provider must no longer receive notifications');
 });
 
-test('unquoteDesktopExecToken round-trips the assignment verify() relies on', () => {
-  // `verify` must read back exactly what `patchDesktopText` wrote, even when the
-  // UI directory contains spaces — otherwise it reports the bundle as ABSENT.
-  const tricky = '/tmp/UI with spaces/and&amp';
-  const patched = patchDesktopText('[Desktop Entry]\nExec=/usr/bin/x %U\n', tricky);
-  const execValue = /^Exec=(.*)$/m.exec(patched.text)[1];
+test('unquoteDesktopExecToken decodes quoted paths with spaces and %% field escapes', () => {
+  const execValue = 'env "AGY_UI_BUNDLE=/tmp/UI with spaces/a%%b" /usr/bin/x %U';
   const assignment = tokenizeDesktopExec(execValue)
     .map(unquoteDesktopExecToken)
     .find((t) => t.startsWith(`${ENV_VAR}=`));
   assert.ok(assignment, 'the assignment token must be recoverable');
   const configured = assignment.slice(ENV_VAR.length + 1).replace(/%%/g, '%');
-  assert.equal(configured, tricky, 'the exact directory must survive the round-trip');
+  assert.equal(configured, '/tmp/UI with spaces/a%b');
 });
 
 test('PATCH_FLAG_PICKER handles braces inside string literals without truncation', () => {
@@ -645,31 +639,8 @@ test('PATCH_FLAG_PICKER fails closed on regex literals and comments instead of g
 });
 
 // ---------------------------------------------------------------------------
-// Desktop Launcher & Atomic File Safety Tests
+// Desktop Launcher Read-Only Parsing & Atomic File Safety Tests
 // ---------------------------------------------------------------------------
-
-test('patchDesktopText folds into existing env prefix without nesting env env', () => {
-  const orig = [
-    '[Desktop Entry]',
-    'Name=Antigravity',
-    'Exec=env http_proxy=http://127.0.0.1:<test-port> /usr/bin/antigravity %U',
-    '',
-  ].join('\n');
-
-  const p1 = patchDesktopText(orig, '/home/u/.local/share/antigravity-uipatch');
-  assert.equal(p1.changed, true);
-  assert.equal(p1.text.includes('env env'), false);
-  assert.ok(p1.text.includes(`Exec=env ${ENV_VAR}=/home/u/.local/share/antigravity-uipatch http_proxy=`));
-
-  const u1 = unpatchDesktopText(p1.text);
-  assert.equal(u1.changed, true);
-  assert.equal(u1.text, orig);
-
-  const bare = '[Desktop Entry]\nExec=/usr/bin/antigravity %U\n';
-  const p2 = patchDesktopText(bare, '/tmp/ui');
-  assert.equal(p2.text, `[Desktop Entry]\nExec=env ${ENV_VAR}=/tmp/ui /usr/bin/antigravity %U\n`);
-  assert.equal(unpatchDesktopText(p2.text).text, bare);
-});
 
 test('atomicWriteFile refuses to overwrite symbolic links', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uipatch-atomic-'));
@@ -685,29 +656,16 @@ test('atomicWriteFile refuses to overwrite symbolic links', () => {
   }
 });
 
-test('patchDesktopText round-trips UI paths containing spaces, quotes and percent signs', () => {
-  const orig = '[Desktop Entry]\nExec=/usr/bin/antigravity %U\n';
-  const tricky = '/tmp/UI with spaces & "quotes"/a%b';
-
-  const patched = patchDesktopText(orig, tricky);
-  assert.equal(patched.changed, true);
-  assert.ok(patched.text.includes(`Exec=env `), 'must use an env prefix');
-
-  // The value goes through TWO layers: KeyFile string encoding, then Exec argv
-  // encoding. Reading back must reverse both, in order.
-  const execRaw = /^Exec=(.*)$/m.exec(patched.text)[1];
-  const tokens = tokenizeDesktopExec(keyFileUnescapeValue(execRaw));
-  const assignmentToken = tokens.find((t) => unquoteDesktopExecToken(t).startsWith(`${ENV_VAR}=`));
-  assert.ok(assignmentToken, 'the assignment must be a single token');
-  const assignValue = unquoteDesktopExecToken(assignmentToken);
-  assert.equal(
-    assignValue,
-    `${ENV_VAR}=${tricky.replace(/%/g, '%%')}`,
-    'the whole path must be recoverable from the single token'
-  );
-
-  // And unwrapping must restore the original file byte-for-byte.
-  assert.equal(unpatchDesktopText(patched.text).text, orig);
+test('analyseDesktopExec decodes GKeyFile + Exec two-layer escaping for spaces, quotes, $, backticks, and %%', () => {
+  // In a GKeyFile `.desktop`, backslashes are doubled (`\\`) on top of Exec quoting.
+  const rawDesktop =
+    '[Desktop Entry]\n' +
+    'Exec=env "AGY_UI_BUNDLE=/tmp/UI with spaces & \\\\"quotes\\\\"/a$b\\\\`c%%d" OTHER="hello world" /usr/bin/antigravity %U\n';
+  const info = analyseDesktopExec(rawDesktop);
+  assert.equal(info.ok, true);
+  assert.equal(info.value, '/tmp/UI with spaces & "quotes"/a$b`c%d');
+  assert.ok(info.assignments.includes('OTHER=hello world'));
+  assert.equal(info.tokens[info.programIndex], '/usr/bin/antigravity');
 });
 
 test('extractZipToDir refuses non-empty targets and symlinked ancestors', () => {
@@ -993,22 +951,7 @@ test('R2-02: local storageService writes notify subscribers even when the RPC qu
   assert.equal(notifications, 2, 'every distinct local write must notify immediately, independent of RPC/IPC');
 });
 
-test('R2-03: desktop encoding survives a real GLib-compatible reading of quotes/$/backtick', () => {
-  const cases = ['/tmp/a"b', '/tmp/a$b', '/tmp/a`b', '/tmp/a\\b', '/tmp/a b'];
-  for (const uiDir of cases) {
-    const patched = patchDesktopText('[Desktop Entry]\nExec=/usr/bin/x %U\n', uiDir);
-    const execRaw = /^Exec=(.*)$/m.exec(patched.text)[1];
-    // The KeyFile layer must be reversible before Exec tokenising.
-    const tokens = tokenizeDesktopExec(keyFileUnescapeValue(execRaw));
-    const asg = tokens.map(unquoteDesktopExecToken).find((t) => t.startsWith(`${ENV_VAR}=`));
-    assert.ok(asg, `assignment missing for ${uiDir}`);
-    assert.equal(asg.slice(ENV_VAR.length + 1).replace(/%%/g, '%'), uiDir);
-    // The Exec line must remain a single line (no stray newline introduced).
-    assert.equal(patched.text.split('\n').length, 3, 'Exec line must stay on one line');
-  }
-});
-
-test('R2-05: parseLauncherAssignment follows env semantics and ignores decoy arguments', () => {
+test('parseLauncherAssignment follows env option/assignment semantics and ignores post-program arguments', () => {
   assert.equal(parseLauncherAssignment('Exec=env AGY_UI_BUNDLE=/a /x %U').value, '/a');
   // last assignment wins, like env(1)
   assert.equal(
@@ -1022,7 +965,7 @@ test('R2-05: parseLauncherAssignment follows env semantics and ignores decoy arg
     '/real'
   );
   assert.equal(parseLauncherAssignment('Exec=/usr/bin/env AGY_UI_BUNDLE=/a /x').value, '/a');
-  assert.equal(parseLauncherAssignment('Exec=env -u HOME AGY_UI_BUNDLE=/a /x').value, '/a');
+  assert.equal(parseLauncherAssignment('Exec=env -i -u HOME -C /tmp -- AGY_UI_BUNDLE=/a /x').value, '/a');
 });
 
 test('structural anchors survive Closure Compiler identifier re-minification', () => {
@@ -1107,71 +1050,23 @@ test('resolveWriteRoot reports a clear PatchError when a parent is not a directo
 // Round-3 (release gate) regressions
 // ---------------------------------------------------------------------------
 
-test('G1: patching twice is idempotent and keeps other env assignments intact', () => {
-  const execValue = 'env OTHER="hello world" /usr/bin/antigravity %U';
-  const src = `[Desktop Entry]\nType=Application\nExec=${keyFileEscapeValue(execValue)}\n`;
-
-  const p1 = patchDesktopText(src, '/tmp/plain');
-  const p2 = patchDesktopText(p1.text, '/tmp/plain');
-  assert.equal(p2.changed, false, 'a second patch must be a no-op');
-  assert.equal((p2.text.match(/AGY_UI_BUNDLE=/g) || []).length, 1);
-
-  const info = analyseDesktopExec(p1.text);
-  assert.equal(info.value, '/tmp/plain');
-  assert.ok(info.assignments.includes('OTHER=hello world'), 'other assignments are preserved');
-  assert.equal(info.tokens[info.programIndex], '/usr/bin/antigravity');
-
-  // And unwrapping restores the original file byte-for-byte.
-  assert.equal(unpatchDesktopText(p1.text).text, src);
-});
-
-test('G1: env options stay before the injected assignment', () => {
-  for (const base of [
-    'Exec=env -i /usr/bin/x %U',
-    'Exec=env -u HOME /usr/bin/x %U',
-    'Exec=env -- /usr/bin/x %U',
-  ]) {
-    const src = `[Desktop Entry]\n${base}\n`;
-    const out = patchDesktopText(src, '/tmp/plain');
-    const info = analyseDesktopExec(out.text);
-    const ourIdx = info.tokens.findIndex((t) => t.startsWith(`${ENV_VAR}=`));
-    const optIdx = info.tokens.findIndex((t) => t.startsWith('-'));
-    assert.ok(ourIdx > 0, `assignment missing for ${base}`);
-    assert.ok(optIdx === -1 || ourIdx > optIdx, `option must precede assignment for ${base}`);
-    assert.equal(info.tokens[info.programIndex], '/usr/bin/x', `program preserved for ${base}`);
-  }
-});
-
-test('G1: unsupported env wrapping is refused, never silently treated as OFF', () => {
-  assert.throws(
-    () => patchDesktopText('[Desktop Entry]\nExec=env -S "A=1 B=2" /usr/bin/x\n', '/tmp/plain'),
-    PatchError
-  );
-  const parsed = parseLauncherAssignment('[Desktop Entry]\nExec=env -S "A=1 B=2" /usr/bin/x\n');
-  assert.equal(parsed.ok, false);
-  assert.equal(parsed.assignment, false);
-});
-
-test('G1: a program-position argument is never read as env nor deleted', () => {
-  const decoy = '[Desktop Entry]\nExec=/usr/bin/x AGY_UI_BUNDLE=/decoy\n';
-  const parsed = parseLauncherAssignment(decoy);
-  assert.equal(parsed.assignment, false, 'post-program assignment is a plain argument');
-  assert.equal(unpatchDesktopText(decoy).changed, false, 'and it must not be removed');
-});
-
-test('G2: analyseDesktopExec distinguishes ON / OFF / INVALID', () => {
+test('analyseDesktopExec distinguishes configured env, unset Exec=, and unsupported custom wrappers', () => {
   const on = analyseDesktopExec('[Desktop Entry]\nExec=env AGY_UI_BUNDLE=/a /usr/bin/x\n');
   assert.equal(on.ok, true);
   assert.equal(on.value, '/a');
 
-  const off = analyseDesktopExec('[Desktop Entry]\nExec=/usr/bin/x\n');
-  assert.equal(off.ok, true);
-  assert.equal(off.value, null);
-  assert.equal(off.usesEnv, false);
+  const unset = analyseDesktopExec('[Desktop Entry]\nExec=/usr/bin/x\n');
+  assert.equal(unset.ok, true);
+  assert.equal(unset.value, null);
+  assert.equal(unset.usesEnv, false);
 
-  const invalid = analyseDesktopExec('[Desktop Entry]\nName=NoExec\n');
-  assert.equal(invalid.ok, false);
-  assert.ok(invalid.unsupported);
+  const splitOpt = parseLauncherAssignment('[Desktop Entry]\nExec=env -S "A=1 B=2" /usr/bin/x\n');
+  assert.equal(splitOpt.ok, false);
+  assert.equal(splitOpt.assignment, false);
+
+  const missingExec = analyseDesktopExec('[Desktop Entry]\nName=NoExec\n');
+  assert.equal(missingExec.ok, false);
+  assert.ok(missingExec.unsupported);
 });
 
 test('G3: secondary Mendel channel catches errors and shares the resolver', () => {

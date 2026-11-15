@@ -61,7 +61,7 @@ language_server (Go, --https_server_port 0 -> https://127.0.0.1:<随机端口>)
 | 其中启用态字符串/数值载荷键 | `0` | **`7`**（另含 `1` 项复杂枚举） | 控制媒体附件上限（`"15"`）、Best-of-N 上限（`"10"`）、免责声明文案等 |
 | 其中显式禁用态（`disabled: true`）前端键 | `0` | **`60`**（含 `enable-developer-mode`、`enable-file-explorer-tab` 等） | 原生账号同样默认隐藏 `Developer` 页与部分实验特性 |
 
-由此可见：**在主入口（`Ola()`）与次级入口（`Qt().getMendelFlags`）共用 `__agyResolveExperiments()` 与 `__agyNormalizeMendel()`——当服务端返回空数组 `[]` 时清空旧缓存并回退注入上述 `41` 项原生开启布尔开关 + `7` 项字符串载荷 + `enable-developer-mode`；当服务端返回非空列表时完整保留线上表并仅确保 `enable-developer-mode` 开启；当拉取抛错时保留上一次成功的实时表（last-known-good）**，即可使网关模式在 `0 overrides` 初始状态下与 Google 原生账号基线对齐。
+由此可见：**在主入口（`Ola()`）与次级入口（`Qt().getMendelFlags`）共用 `__agyResolveExperiments()` 与 `__agyNormalizeMendel()`——当服务端返回空数组 `[]` 时清空旧缓存并回退注入上述 `41` 项原生开启布尔开关 + `7` 项字符串载荷 + `enable-developer-mode` 与 `enable-context-usage-indicator`；当服务端返回非空列表时完整保留线上表并仅确保上述两项解锁开关开启；当拉取抛错时保留上一次成功的实时表（last-known-good）**，即可使网关模式在 `0 overrides` 初始状态下与 Google 原生账号基线对齐。
 
 ### 2.2 为什么原版前端在公开构建下无法覆盖轨道 A / C
 

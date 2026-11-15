@@ -1,6 +1,6 @@
 # 补丁架构与脚本实现详解（`antigravity_uipatch.mjs`）
 
-> 本文档面向开发者、系统管理员与逆向工程研究人员，详细解析 `antigravity_uipatch.mjs` 的无依赖内部实现：包括尾部追加式 Electron ASAR 读写算法、`language_server` 双内嵌 ZIP 归档识别与纯 `node:zlib` CRC32 解压器、`main.js` 五处前端汇聚点补丁（含双通道共享实验解析器、`window.nativeStorage` 跨随机端口磁盘持久化桥接、严格结构扫描器与洁净室上下文容量及推理遥测指示器）、统一桌面启动器解析器 `analyseDesktopExec()`、原子目录切换与备份配对状态机，以及 Pacman Hook 的 Root 权限边界设计。
+> 本文档面向开发者、系统管理员与逆向工程研究人员，详细解析 `antigravity_uipatch.mjs` 的无依赖内部实现：包括尾部追加式 Electron ASAR 读写算法、`language_server` 双内嵌 ZIP 归档识别与纯 `node:zlib` CRC32 解压器、`main.js` 五处前端汇聚点补丁（含双通道共享实验解析器、`window.nativeStorage` 跨随机端口磁盘持久化桥接、严格结构扫描器与上下文及推理遥测指示器）、只读桌面启动器解析器 `analyseDesktopExec()`、原子目录切换与备份配对状态机，以及 Pacman Hook 的 Root 权限边界设计。
 
 ---
 
@@ -70,22 +70,12 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 即 **2 行注释 + 3 行代码 = 5 行新增**（`if` 条件、`args.push` 与闭合花括号）。
 
-### 2.4 桌面启动器 `Exec=` 的双层编码与统一语义解析（`analyseDesktopExec`）
+### 2.4 桌面启动器 `Exec=` 的只读双层解码与语义解析（`analyseDesktopExec`）
 
-`~/.local/share/applications/antigravity.desktop` 的 `Exec=` 行**不是** shell 脚本，且同时受两套独立语法规范约束：
-1. **内层（Desktop Entry `Exec` argv 层）**：含空白或保留字符的参数须加双引号，引号内仅对 `"`、`` ` ``、`$`、`\` 做反斜杠转义，字面 `%` 必须写为 `%%`（防止被当作 `%U` 等字段码）；且引号可以出现在参数中间（如 `OTHER="hello world"` 是一个完整参数）。
-2. **外层（GLib `GKeyFile` 字符串层）**：整条 `Exec=` 右值作为键值字符串存储时，反斜杠必须双写（`\\`），换行/回车/制表符须转义，行首空格须写为 `\s`。
-
-**写入与读取的层次顺序必须严格对称**：
-- **写入序列化（`patchDesktopText` / `unpatchDesktopText`）**：先对需要改动的参数执行 **Exec argv 层编码**（`desktopExecEscapeArg()`），与其余原始参数拼接为完整命令行后，再整体执行 **GKeyFile 字符串层编码**（`keyFileEscapeValue()`）落盘；
-- **读取反序列化（`analyseDesktopExec`）**：先执行 **GKeyFile 字符串层解码**（`keyFileUnescapeValue()`），再交由 `tokenizeDesktopExec()`（支持参数内部引号区间）与 `unquoteDesktopExecToken()` 还原 `argv` 数组。若缺少外层解码或颠倒顺序，含 `"`、`$`、反引号的路径要么被 GLib/Gio（`Gio.DesktopAppInfo.new_from_filename()`）直接拒绝，要么在第二次 `install`/`sync` 时发生重复转义破坏命令行。
-
-为彻底消除读写分歧，`patchDesktopText()`、`unpatchDesktopText()` 与 `cmdVerify()` **三方共用单一解析器 `analyseDesktopExec()`**：
-- **保留原始引号实现幂等重写**：解析器同时返回 `rawTokens`（未剥引号的原始 token）与解码后的 `tokens`。改写时仅替换或插入 `AGY_UI_BUNDLE=<ui-dir>` 对应的单个元素，其余参数直接复用 `rawTokens`，确保既有带引号变量（如 `OTHER="hello world"`）原样保留且重复运行 `install`/`sync` 完全幂等。
-- **完整建模受支持 `env` 前缀语法**：识别 `env` 与 `*/env` 前缀下的无参选项（`-i`/`--ignore-environment`、`-0`/`--null`、`-v`/`--debug`）、带参选项（`-u`/`--unset`、`-C`/`--chdir`）及选项终止符 `--`；注入位置**恒在所有 `env` 选项之后、程序名之前**（避免把 `-i`/`-u` 挤到赋值后面被当作程序执行）；保留全部其他 `NAME=value` 赋值（同名多次赋值按 `env(1)` 后胜出语义取值），而程序名之后的同形参数一律按普通程序参数保留（既不读取也不删除）。`unpatchDesktopText()` 仅在移除本变量后既无剩余环境变量也无 `env` 选项（`!hadOptions`）时才移除前导 `env`。
-- **未知包装器显式拒绝**：遇到 `env -S` / `--split-string` 或未知 `-*` 选项时，`analyseDesktopExec()` 返回 `ok: false` 并标注 `unsupported`，写入命令以退出码 `3` 明确拒绝改写，`verify` 将其判为 `INVALID`，绝不静默猜测为 `OFF`。
-
-> **实证**：使用系统真实 `Gio.DesktopAppInfo` 对含空格、`%`、`"`、`$`、反引号、反斜线、既有带引号环境变量及 `env -i` 等 8 类场景执行“首次注入 → 重复注入 → `disable` 卸载”全生命周期启动捕获，全部精确传递原始路径参数。
+脚本绝不自动创建或改写 `~/.local/share/applications/antigravity.desktop`；但在 `makePaths()`（供 `repair` 自动跟随自定义路径）与 `cmdVerify()` 中，会以只读方式解析用户可能配置的 `.desktop` `Exec=` 行。由于 `.desktop` 的 `Exec=` 行并非 shell 脚本且同时受两层语法约束，`analyseDesktopExec()` 按相反顺序逐层还原：
+1. **外层（GLib `GKeyFile` 字符串层反转义）**：由 `keyFileUnescapeValue()` 先将双写反斜杠（`\\`）、换行/制表符及行首 `\s` 还原；
+2. **内层（Desktop Entry `Exec` argv 层分词与去引号）**：由 `tokenizeDesktopExec()`（支持 `OTHER="hello world"` 这类参数内引号区间）与 `unquoteDesktopExecToken()` 还原 `"`、`` ` ``、`$`、`\` 转义，并将字面 `%%` 还原为 `%`；
+3. **`env` 选项与程序参数边界建模**：识别 `env` 与 `*/env` 前缀下的无参选项（`-i`/`--ignore-environment`、`-0`/`--null`、`-v`/`--debug`）、带参选项（`-u`/`--unset`、`-C`/`--chdir`）及选项终止符 `--`；仅提取程序名之前的 `AGY_UI_BUNDLE=<ui-dir>` 赋值（同名多次赋值按 `env(1)` 后胜出语义取值），程序名之后的同形参数按普通参数忽略；遇到 `env -S` 或未知选项时标注 `unsupported`，由 `verify` 作信息提示而不误猜。
 
 ---
 
@@ -115,7 +105,7 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 ## 4. `main.js` 五处结构化前端汇聚点补丁详解
 
-在提取出的 `548` 个归档条目（`540` 个文件 + `8` 个目录）中，除 `main.js` 外的其余 `539` 个文件保持原厂字节不变，仅对核心包 `main.js`（`2.31.0-1` 原版 `11,871,831` 字节 → 修补后 `11,908,541` 字节）施加以下 **5 处结构化唯一锚点补丁**（以下括号内符号以 `CL 1017595969` 构建为例，实际运行期均由 `matchUnique()` / `resolveUniqueIdentifier()` 自动从语法结构捕获）：
+在提取出的 `548` 个归档条目（`540` 个文件 + `8` 个目录）中，除 `main.js` 外的其余 `539` 个文件保持原厂字节不变，仅对核心包 `main.js`（`2.31.0-1` 原版 `11,871,831` 字节 → 修补后 `11,917,108` 字节）施加以下 **5 处结构化唯一锚点补丁**（以下括号内符号以 `CL 1017595969` 构建为例，实际运行期均由 `matchUnique()` / `resolveUniqueIdentifier()` 自动从语法结构捕获）：
 
 ### 4.1 补丁 1：`mendel-native-baseline`（`Ola()` 启动预热 + Google 原生基线回退）
 
@@ -127,8 +117,8 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
    - **可重试与有界超时语义**：IPC 抛错或读取超时（`__AGY_HYDRATE_TIMEOUT = 2000ms`）会在 `catch` 中将状态复位为 `idle`，使下一次调用真正重试；当 `window` 存在但 `window.nativeStorage.getItems` 尚未出现时，在 `__AGY_BRIDGE_GRACE`（`8000ms`）宽限期内保持 `idle` 允许晚挂载桥接重试，超过宽限期则回退读取同源 `window.localStorage` 并置为 `done`。若此时 `hhd()` 已完成 `storageService` 绑定（`__agyStorageBound === true`），预热快照自动让位，绝不覆盖实时状态。
 2. **基线归一化 `__agyNormalizeMendel(list)`**：
    - 通过捕获到的 Protobuf 消息构造器构造合法 `ExperimentWithVariantSchema` 实例，满足前端每 5 分钟轮询的结构相等性校验；
-   - **当输入列表为空 `[]`**：自动回退构造 Google 原生账号线上实测开启的全部 **41 项前端布尔开关**（`NATIVE_MENDEL_BOOL_FLAGS`）+ **7 项字符串载荷配置**（`NATIVE_MENDEL_STRING_FLAGS`，如 `max-media-attachments = "15"`、`max-best-of-n = "10"` 等）+ **`enable-developer-mode`**；
-   - **当输入列表非空**：原样保留云端下发的完整实验列表，仅确保 `enable-developer-mode` 处于 `disabled: false`。
+   - **当输入列表为空 `[]`**：自动回退构造 Google 原生账号线上实测开启的全部 **41 项前端布尔开关**（`NATIVE_MENDEL_BOOL_FLAGS`）+ **7 项字符串载荷配置**（`NATIVE_MENDEL_STRING_FLAGS`，如 `max-media-attachments = "15"`、`max-best-of-n = "10"` 等）+ **`FLAGS`（`enable-developer-mode` 与 `enable-context-usage-indicator`）**；
+   - **当输入列表非空**：原样保留云端下发的完整实验列表，仅确保 `FLAGS`（`enable-developer-mode` 与 `enable-context-usage-indicator`）处于 `disabled: false`。
 3. **双通道共享解析策略 `__agyResolveExperiments(raw)`**：
    - **成功且返回非空数组** → 更新 `__agyLastGood` 并原样返回；
    - **成功但返回空数组 `[]`**（在网关模式下，服务端返回 `{"experimentConfig":{}}`，经 Protobuf 解码后 `experiments` 默认补全为空数组 `[]`）→ 视为服务端撤回实验表（如切换账号或切入网关模式），**清空 `__agyLastGood = null` 并返回 `[]`**，继而由 `__agyNormalizeMendel([])` 启用静态原生基线；
@@ -152,10 +142,10 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 |---|---|---|
 | `syncBool`（主锚点） | `function Hi(a,b){return(a=a.experiments[b])?!a.disabled:!1}` | 外包 `__agyOvr(b, ...)`，使同步布尔读取优先采纳本地覆盖值 |
 | `reactiveBool` | `Ii` 内 `jh(a.stateProvider,d=>(d=d[b])?!d.disabled:!1)` | 外包 `__agyOvr(b, ...)`，使全部 `Ii()` / `CKc()` 响应式布尔流实时响应覆盖（不篡改 `stateProvider` 基线字典） |
-| `flagOverrideSync` | `Tla` 构造器内 `this.flagOverrideSync=new Mla(...)` | 注册刷新回调至 `this.__agyDisposeNotifier`，包装 `this.flagOverrideSync.set(m)` 使其在入队 RPC 前同步调用 `__agySetOvrMap(m)` 触发即时通知，并在 best-effort RPC 前后刷新 `stateProvider`（内层 `try/catch` 吞掉预期的 `permission_denied`） |
+| `flagOverrideSync` | `Tla` 构造器内 `this.flagOverrideSync=new Mla(...)` | 记录 `globalThis.__agyLsClient = __agySelf.lsClient`（供遥测指示器增量拉取统计），注册刷新回调至 `this.__agyDisposeNotifier`，包装 `this.flagOverrideSync.set(m)` 使其在入队 RPC 前同步调用 `__agySetOvrMap(m)` 触发即时通知，并在 best-effort RPC 前后刷新 `stateProvider`（内层 `try/catch` 吞掉预期的 `permission_denied`） |
 | `providerDispose` | `Tla.prototype.dispose()` | 在释放 `stateProvider` 前自动调用 `this.__agyDisposeNotifier()`，避免多实例重建时残留回调 |
 | `secondaryBool` | `var IT=a=>(a=NMb(a))?!a.disabled:!1,` | 外包 `__agyOvr(a, ...)`（保持左值先执行 `NMb(a)` 以遵守 React Hooks 顺序规则），使次级通道布尔读取同样响应本地覆盖 |
-| `storageInit` | `async function hhd(a){...}` | 通过函数头跳板外包 `__agyBindStorage(await __agyRawStorageInit(a))`：在 `storageService` 初始化完成后立即同步当前 `customFlagOverrides`、执行一次性同源旧 `localStorage` 迁移，并订阅 `storageService.onDidChange`（涵盖本地拨动、`Reset overrides` 及跨窗口 `nativeStorage.onChanged` 广播） |
+| `storageInit` | `async function hhd(a){...}` | 通过函数头跳板外包 `__agyBindStorage(await __agyRawStorageInit(a))`：在 `storageService` 初始化完成后立即同步当前 `customFlagOverrides`、执行一次性同源旧 `localStorage` 迁移、首次未设置时默认写入 `contextUsageIndicatorEnabled = "true"`（用户手动关闭后永久保留），并订阅 `storageService.onDidChange`（涵盖本地拨动、`Reset overrides` 及跨窗口 `nativeStorage.onChanged` 广播） |
 
 ### 4.4 补丁 4：`flag-picker-scrollable`（`Developer` 面板向上可滚动开关选择器）
 
@@ -229,15 +219,15 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 Pacman `PostTransaction` Hook 由 `libalpm` 以 `root` 身份、`HOME=/root` 环境直接通过 `execv(3)` 调用，脚本为此实施三项强制约束：
 
-1. **按解析后的 UID 校验非 Root 目标账号**：当 `uid === 0` 且 `HOME === '/root'` 而未指定 `--user <username>`（或 `AGY_TARGET_USER`）时立即退出（退出码 `2`）；`resolveUserAccount()` 通过 `getent passwd` 解析真实 `uid`/`gid`/`home`，凡 `uid === 0`（无论传入 `root`、`0` 还是别名）一律拒绝，并使用解析出的规范用户名生成 `Exec = /usr/bin/node <scriptPath> sync --user <canonicalUser>`（不附加 `--quiet`，使升级同步摘要直接呈现在 Pacman 事务输出中）。同步完成后，`reclaimUserOwnership()` 将外置 UI 目录、备份目录与 `.desktop` 文件统一 `chown` 归还该桌面用户，并通过 `runuser -u <username>` 刷新其 KDE `ksycoca6` 缓存。
+1. **按解析后的 UID 校验非 Root 目标账号**：当 `uid === 0` 且 `HOME === '/root'` 而未指定 `--user <username>`（或 `AGY_TARGET_USER`）时立即退出（退出码 `2`）；`resolveUserAccount()` 通过 `getent passwd` 解析真实 `uid`/`gid`/`home`，凡 `uid === 0`（无论传入 `root`、`0` 还是别名）一律拒绝，并使用解析出的规范用户名生成 `Exec = /usr/bin/node <scriptPath> sync --user <canonicalUser>`（不附加 `--quiet`，使升级同步摘要直接呈现在 Pacman 事务输出中）。同步完成后，`reclaimUserOwnership()` 将外置 UI 目录与备份目录统一 `chown` 归还该桌面用户。
 2. **脚本路径链强制 Root 审计（`auditRootOwnedChain`）**：`pacman-hook --write` 在写入 Hook 前，先对 `--script-path` 词法路径的每一级组件执行 `lstat`，**任一级为符号链接即拒绝**（防止审计与 Hook 执行之间重指目标）；随后对 `fs.realpathSync()` 解析出的**物理祖先链**逐级 `stat`，要求每一级均满足 `uid === 0` 且 `mode & 0o022 === 0`（组与其他用户均不可写）。
 3. **写入前可无损预演**：`pacman-hook --write --dry-run` 完整执行账号校验与路径权限链审计，仅输出目标路径而不创建文件。
 
-### 5.4 `--dry-run` 前置预检与 `verify` 四态健康契约
+### 5.4 `--dry-run` 前置预检与 `verify` 结构化健康判定
 
-- **`--dry-run` 全局零写入与按命令预检**：所有子命令在 `--dry-run` 模式下保证零文件/目录变动，并执行各自对应的只读预检——`install` / `sync` 调用共享 `preflightAll()`（运行完整 `cmdSelfTest` 并模拟 `ensurePairedBackup` 的全部分支，包括“已挂钩但缺失备份”与“已挂钩但备份损坏/失配”均与真实运行一样返回退出码 `3`）；`repair` 在内存中读取二进制、提取 `main.js` 并运行完整 5 处补丁与 V8 语法检查；`restore`、`disable`、`extract`、`pacman-hook --write` 分别校验各自前置条件。
+- **`--dry-run` 全局零写入与按命令预检**：所有子命令在 `--dry-run` 模式下保证零文件/目录变动，并执行各自对应的只读预检——`install` / `sync` 调用共享 `preflightAll()`（运行完整 `cmdSelfTest` 并模拟 `ensurePairedBackup` 的全部分支，包括“已挂钩但缺失备份”与“已挂钩但备份损坏/失配”均与真实运行一样返回退出码 `3`）；`repair` 在内存中读取二进制、提取 `main.js` 并运行完整 5 处补丁与 V8 语法检查；`restore`、`extract`、`pacman-hook --write` 分别校验各自前置条件。
 - **`extract` 目录保护**：`assertSafeTargetDir()` 显式拒绝 `/`、`$HOME`、安装根目录及其直接父目录（退出码 `2`），并对任何已存在的非空目录或非普通目录以退出码 `3` 拒绝写入。
-- **`verify` 四态启动器模型与结构化健康判定**：
-  1. 启动器由 `analyseDesktopExec()` 严格归类为四态之一：`ON`（合法 `env` 前缀中含有 `AGY_UI_BUNDLE`）、`OFF`（合法 `Exec=` 行且不含该变量）、`INVALID`（启动器文件缺失、无 `Exec=`、空 `Exec=` 或含不支持的 `env -S` / 未知选项）以及初始兜底态 `UNKNOWN`；
-  2. 对 `uipatch.json` 执行严格对象校验（显式拒绝 JSON `null`、数组、原始类型、缺失 `lsVersion.cl` 或缺失 `mainJsSha256`），核对记录哈希与磁盘 `main.js` 真实 SHA256 一致、校验 `main.js` V8 语法与补丁标记，并验证 `index.html` 存在；
-  3. 当启动器处于主动停用的 `OFF` 状态时，未被其引用的默认外置 UI 目录若不存在，仅输出信息提示而不计入故障；若全部受检项无异常，打印明确说明（`launcher is OFF: the stock built-in UI is active by design`）并以退出码 `0` 结束；任一受检项存在故障则汇总打印 `unhealthy` 清单并以退出码 `1` 结束。
+- **`verify` 结构化健康判定**：
+  1. 强制核验 `app.asar` 已含惰性钩子（`PATCHED`）且与 `app.asar.orig` 满足内容级 `pairsWith()` 配对；
+  2. 对外置 UI 目录中的 `uipatch.json` 执行严格对象校验（显式拒绝 JSON `null`、数组、原始类型、缺失 `lsVersion.cl` 或缺失 `mainJsSha256`），核对引擎构建 `CL` 对齐、记录哈希与磁盘 `main.js` 真实 SHA256 一致、校验 `main.js` V8 语法与补丁标记，并验证 `index.html` 存在；
+  3. 以只读方式检查 `~/.local/share/applications/antigravity.desktop`：若用户显式配置了 `AGY_UI_BUNDLE=<dir>` 则一并核验该目录可达，若未创建或未写入该变量则仅提示手动传参方式而不计入故障；任一核心受检项异常则汇总打印 `unhealthy` 清单并以退出码 `1` 结束。
