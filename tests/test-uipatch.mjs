@@ -24,8 +24,10 @@ import {
   ASAR_HOOK_ANCHOR,
   ASAR_TARGET,
   ENV_VAR,
+  FLAGS,
   NATIVE_MENDEL_BOOL_FLAGS,
   NATIVE_MENDEL_STRING_FLAGS,
+  PATCH_CONTEXT_INDICATOR,
   PATCH_FLAG_PICKER,
   PATCH_MENDEL_BASELINE,
   PATCH_MENDEL_OVERRIDES,
@@ -156,6 +158,8 @@ const SYNTH_BASELINE_SNIPPET =
 
 const SYNTH_BUNDLE = [
   SYNTH_BASELINE_SNIPPET,
+  'var I={};I.TokenType={UNSPECIFIED:0,SYSTEM_PROMPT:1,TOOLS:2,RULES:3,MCP_TOOLS:4,SKILLS:5,SUBAGENTS:6,CHAT_MESSAGES:7,WORKFLOWS:8,PLUGINS:9,FLOWS:10};I.CortexStepStatus={UNSPECIFIED:0,GENERATING:8,RUNNING:2,DONE:3}',
+  'var $7a=a=>({optimisticState:{},trueState:{}}),$B=(a,b)=>{var c=[],{optimisticState:d,trueState:f}=$7a(a);return b.selector(f)}',
   'function Hi(a,b){return(a=a.experiments[b])?!a.disabled:!1}',
   'function Ii(a,b){var c;c||(c=jh(a.stateProvider,d=>(d=d[b])?!d.disabled:!1),a.experimentEnabledProviders.set(b,c));return c}',
   'var Tla=class{constructor(a){this.lsClient=a;this.stateProvider={getState:()=>({}),setState:()=>{},dispose:()=>{}};this.flagOverrideSync=new Mla(async b=>{var c=e,d=e;try{d(await c(this.lsClient.setMendelFlagOverrides(Wb(yia,{overrides:b}))))}finally{c()}});}dispose(){Rla(this);this.stateProvider.dispose();}}',
@@ -164,6 +168,8 @@ const SYNTH_BUNDLE = [
   'var fgd=class{constructor(a=window.nativeStorage){this.bridge=a;this.cache=new Map;this.listeners=new Set}async init(){let c=(await this.bridge.getItems())||{};for(let [d,f]of Object.entries(c))this.cache.set(d,f)}notify(a){for(let b of this.listeners)b(a)}get(a,b){return this.cache.get(a)??b}store(a,b){this.cache.set(a,b);this.notify({[a]:b});return this.bridge.updateItems({[a]:b})}remove(a){this.cache.delete(a);this.notify({[a]:null});return this.bridge.updateItems({[a]:null})}onDidChange(a){this.listeners.add(a);return()=>{this.listeners.delete(a)}}};',
   'async function hhd(a){var b=e,c=e;try{if(typeof window!=="undefined"&&window.nativeStorage)try{let f=new fgd(window.nativeStorage);c(await b(f.init()));return{backend:"native-bridge",storageService:f}}catch(f){}return{backend:"web",storageService:null}}finally{b()}}',
   'function EGb({suggestedFlags:a,onAdd:b}){var [c,d]=B.useState("");var r=B.createElement("datalist",{id:"custom-flag-suggestions"},a.map(function(g){return B.createElement("option",{key:g,value:g})}));return B.createElement("div",null,r,B.createElement(Uy,{variant:"outline",size:"sm",disabled:!c.trim(),onClick:function(){}},"Add"))}',
+  'function _toolbarMount(d){return {portal:nw.createPortal(null,null),side:B.createElement(HIc,{conversationId:d})}}',
+  'var __bootBindings;(function(a){__bootBindings=a})({autonomousMode:void 0,conciergeCos:void 0,contextUsageIndicator:void 0,contextWindow:void 0,getAppVariant:async function(){return{}}})',
 ].join(';\n');
 
 // ---------------------------------------------------------------------------
@@ -280,15 +286,18 @@ test('ZIP reader rejects path-traversal entry names and skips tzdata archives', 
 // Frontend Mendel Baseline, Local Override & Picker Patch Tests
 // ---------------------------------------------------------------------------
 
-test('applyPatches transforms all 4 sites cleanly and passes V8 syntax check', () => {
+test('applyPatches transforms all 5 sites cleanly and passes V8 syntax check', () => {
   const src = SYNTH_BUNDLE + ';function afterMtb(){return 7}';
-  const { output, results } = applyPatches(src, { flags: ['enable-developer-mode'] });
+  const { output, results } = applyPatches(src, { flags: FLAGS });
 
-  assert.equal(results.length, 4);
+  assert.equal(results.length, 5);
+  assert.equal(results[4].id, 'context-usage-indicator');
+  assert.equal(results[4].mode, 'enhanced');
   assert.equal(output.includes('datalist'), false);
   assert.equal(output.includes('custom-flag-suggestions'), false);
   assert.ok(output.includes('bottom-full mb-1'));
   assert.ok(output.includes('max-h-64 overflow-y-auto'));
+  assert.ok(output.includes('__AgyContextIndicator'));
   assert.equal(output.includes('top-full'), false);
   assert.ok(output.endsWith(';function afterMtb(){return 7}'));
 
@@ -1016,7 +1025,12 @@ test('structural anchors survive Closure Compiler identifier re-minification', (
     .replace(/\bOla\b/g, 'Zza')
     .replace(/\bWb\b/g, 'mkPb')
     .replace(/\bUia\b/g, 'ReqPb')
-    .replace(/\bE\.ExperimentWithVariantSchema\b/g, 'P9.ExperimentWithVariantSchema')
+    .replace(/\bE\.ExperimentWithVariantSchema\b/g, '$$P9.ExperimentWithVariantSchema')
+    .replace(/\bI\./g, '$$CxPb.')
+    .replace(/var I=\{\}/g, 'var $$CxPb={}')
+    .replace(/\$7a/g, '$$OptHook')
+    .replace(/\$B/g, '$$ConvHook')
+    .replace(/\bnw\./g, '$$PortalNs.')
     .replace(/\bHi\b/g, 'syncR')
     .replace(/\bIi\b/g, 'reactR')
     .replace(/\bjh\b/g, 'mapSt')
@@ -1029,14 +1043,16 @@ test('structural anchors survive Closure Compiler identifier re-minification', (
     .replace(/\bhhd\b/g, 'initClientStorage')
     .replace(/\bfgd\b/g, 'NativeStoreImpl')
     .replace(/\bEGb\b/g, 'FlagCombo')
-    .replace(/\bB\./g, 'ReactNs.')
+    .replace(/\bB\./g, '$$ReactNs.')
     .replace(/\bUy\b/g, 'OutlineBtn');
 
-  const { output, results } = applyPatches(reminified, { flags: ['enable-developer-mode'] });
-  assert.equal(results.length, 4);
+  const { output, results } = applyPatches(reminified, { flags: FLAGS });
+  assert.equal(results.length, 5);
   assert.ok(output.includes('async function Zza(a)'));
   assert.ok(output.includes('function FlagCombo({suggestedFlags:a,onAdd:b})'));
-  assert.ok(output.includes('ReactNs.createElement(OutlineBtn,'));
+  assert.ok(output.includes('$ReactNs.createElement(OutlineBtn,'));
+  assert.ok(output.includes('$ConvHook(convId,CTX_SEL)'));
+  assert.ok(output.includes('$PortalNs.createPortal('));
   assert.doesNotThrow(() => verifyJsSyntax(output));
 });
 
@@ -1153,4 +1169,496 @@ test('G3: secondary Mendel channel catches errors and shares the resolver', () =
   assert.ok(output.includes('Failed to fetch Mendel flags (secondary)'));
   assert.ok(output.includes('__agyResolveExperiments(ok?x:void 0)'));
   assert.ok(output.includes('__agyDisposeNotifier'), 'provider keeps the notifier disposer');
+});
+
+// ---------------------------------------------------------------------------
+// Context Usage & Inference Telemetry Indicator Tests
+// ---------------------------------------------------------------------------
+
+test('Context Indicator _derive computes TokenType breakdown, compaction ~, BigInt TPS/TTFT/Cache, and live streaming', () => {
+  const { output } = applyPatches(SYNTH_BUNDLE, { flags: FLAGS });
+  const ctx = vm.createContext({
+    E: {
+      ExperimentWithVariantSchema: 'SchemaStub',
+      Model: { 12: 'MODEL_GEMINI_4_CARBON', 0: 'MODEL_UNSPECIFIED' },
+    },
+    Wb: (_s, init) => ({ ...init }),
+    yia: 'OverrideSchema',
+    Uia: 'ReqSchema',
+    B: {},
+    nw: { createPortal: () => null },
+    HIc: () => null,
+    Uy: 'ButtonStub',
+    Rla: () => {},
+    f: (fn) => fn,
+    jh: () => ({}),
+    NMb: () => null,
+    Mla: class {},
+    e: (x) => x,
+    console,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    window: undefined,
+  });
+  vm.runInContext(output, ctx);
+
+  const binding = ctx.__bootBindings.contextUsageIndicator;
+  assert.equal(typeof binding?.Indicator, 'function');
+  assert.equal(typeof binding?._derive, 'function');
+
+  // 1. Empty / zero state returns null
+  assert.equal(binding._derive(undefined, null, 1000), null);
+  assert.equal(
+    binding._derive({ contextWindowUsage: { estimatedTokensUsed: 0, maxContextTokens: 983040 } }, null, 1000),
+    null
+  );
+
+  // 2. Completed turn with BigInt usage, Vertex model path, cache hit, thinking tokens, and retry badge
+  const completed = binding._derive(
+    {
+      conversationId: 'conv-1',
+      contextWindowUsage: {
+        lastStepIndex: 3,
+        estimatedTokensUsed: 241620,
+        maxContextTokens: 983040,
+        estimatedAfterCompaction: false,
+        tokenGroups: [
+          { type: 1, numTokens: 24800 }, // SYSTEM_PROMPT
+          { type: 2, numTokens: 19620 }, // TOOLS
+          { type: 4, numTokens: 12400 }, // MCP_TOOLS
+          { type: 3, numTokens: 4000 },  // RULES
+          { type: 5, numTokens: 2400 },  // SKILLS
+          { type: 7, numTokens: 178400 }, // CHAT_MESSAGES
+        ],
+      },
+      trajectorySlice: {
+        stepsInSlice: [
+          {
+            status: 3, // DONE
+            metadata: { sourceTrajectoryStepInfo: { stepIndex: 2 } },
+            step: {
+              case: 'plannerResponse',
+              value: {
+                response: 'Done.',
+                thinkingDuration: { seconds: 4n, nanos: 900000000 },
+              },
+            },
+          },
+        ],
+        generatorMetadatasInSlice: [
+          {
+            stepIndices: [2],
+            metadata: {
+              case: 'chatModel',
+              value: {
+                responseModelFull: 'projects/p/locations/us/publishers/google/models/gemini-4-argon-b',
+                timeToFirstToken: { seconds: 1n, nanos: 140000000 },
+                streamingDuration: { seconds: 5n, nanos: 0 },
+                retries: 1,
+                retryInfos: [{ waitTime: { seconds: 2n, nanos: 100000000 } }],
+                usage: {
+                  inputTokens: 240000n,
+                  outputTokens: 4000n,
+                  thinkingOutputTokens: 3200n,
+                  responseOutputTokens: 800n,
+                  cacheReadTokens: 216000n,
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+    { key: '', startMs: 0 },
+    10000
+  );
+
+  assert.ok(completed);
+  assert.equal(completed.used, 241620);
+  assert.equal(completed.max, 983040);
+  assert.equal(completed.chat, 178400);
+  assert.equal(completed.sys, 63220);
+  assert.equal(completed.free, 983040 - 241620);
+  assert.equal(completed.isWarn, false);
+  assert.equal(completed.approx, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(completed.groups)), [
+    ['System', 24800],
+    ['Tools', 19620],
+    ['MCP', 12400],
+    ['Rules/Skills', 6400],
+  ]);
+  assert.equal(completed.t.streaming, false);
+  assert.equal(completed.t.model, 'gemini-4-argon-b');
+  assert.equal(
+    completed.t.rawModel,
+    'projects/p/locations/us/publishers/google/models/gemini-4-argon-b'
+  );
+  assert.equal(completed.t.tps, 800); // 4000 tok / 5.0s
+  assert.ok(Math.abs(completed.t.ttftSec - 1.14) < 1e-6);
+  assert.ok(Math.abs(completed.t.durSec - 6.14) < 1e-6);
+  assert.equal(completed.t.cachePct, 90);
+  assert.equal(completed.t.outTok, 4000);
+  assert.equal(completed.t.thinkTok, 3200);
+  assert.equal(completed.t.retries, 1);
+  assert.ok(Math.abs(completed.t.retryWaitSec - 2.1) < 1e-6);
+
+  // 3. Compaction detection from post-lastStepIndex non-intentOnly checkpoint + >=80% warning
+  const compacted = binding._derive(
+    {
+      contextWindowUsage: {
+        lastStepIndex: 5,
+        estimatedTokensUsed: 800000,
+        maxContextTokens: 983040,
+        tokenGroups: [],
+      },
+      trajectorySlice: {
+        stepsInSlice: [
+          {
+            status: 3, // DONE
+            metadata: { sourceTrajectoryStepInfo: { stepIndex: 6 } },
+            step: { case: 'checkpoint', value: { intentOnly: false } },
+          },
+        ],
+        generatorMetadatasInSlice: [],
+      },
+    },
+    null,
+    20000
+  );
+  assert.equal(compacted.isWarn, true);
+  assert.equal(compacted.approx, true);
+
+  // 4. Live streaming estimation ignores stale prior-step GeneratorMetadata (`stepIndices: [2]`)
+  const tracker = { key: '', startMs: 0 };
+  binding._derive(
+    {
+      conversationId: 'conv-1',
+      contextWindowUsage: { lastStepIndex: 3, estimatedTokensUsed: 250000, maxContextTokens: 983040 },
+      trajectorySlice: {
+        stepsInSlice: [
+          {
+            status: 8, // GENERATING
+            metadata: { sourceTrajectoryStepInfo: { stepIndex: 5 } },
+            step: {
+              case: 'plannerResponse',
+              value: { rawThinking: 'a'.repeat(400), response: 'b'.repeat(200) },
+            },
+          },
+        ],
+        generatorMetadatasInSlice: [
+          {
+            stepIndices: [2], // Stale Turn 1 metadata!
+            metadata: {
+              case: 'chatModel',
+              value: {
+                responseModel: 'gemini-3.8-flash',
+                streamingDuration: { seconds: 5n, nanos: 0 },
+                usage: { outputTokens: 9999n },
+              },
+            },
+          },
+        ],
+      },
+    },
+    tracker,
+    50000
+  );
+  const live2 = binding._derive(
+    {
+      conversationId: 'conv-1',
+      contextWindowUsage: { lastStepIndex: 3, estimatedTokensUsed: 250000, maxContextTokens: 983040 },
+      trajectorySlice: {
+        stepsInSlice: [
+          {
+            status: 8, // GENERATING
+            metadata: { sourceTrajectoryStepInfo: { stepIndex: 5 } },
+            step: {
+              case: 'plannerResponse',
+              value: { rawThinking: 'a'.repeat(400), response: 'b'.repeat(400) },
+            },
+          },
+        ],
+        generatorMetadatasInSlice: [
+          {
+            stepIndices: [2],
+            metadata: {
+              case: 'chatModel',
+              value: {
+                responseModel: 'gemini-3.8-flash',
+                streamingDuration: { seconds: 5n, nanos: 0 },
+                usage: { outputTokens: 9999n },
+              },
+            },
+          },
+        ],
+      },
+    },
+    tracker,
+    52000 // +2.0s elapsed, 800 chars -> ~200 est tokens -> ~100 tok/s
+  );
+  assert.equal(live2.t.streaming, true);
+  assert.equal(live2.t.tpsApprox, true);
+  assert.equal(live2.t.model, 'gemini-3.8-flash', 'keeps conversation model badge stable');
+  assert.equal(live2.t.outTok, 200, 'must NOT leak stale 9999 outputTokens from step 2');
+  assert.equal(live2.t.thinkTok, 100);
+  assert.equal(live2.t.tps, 100);
+});
+
+test('PATCH_CONTEXT_INDICATOR supports custom override, polyfill bypass, stock passthrough, and native fallback', () => {
+  // 1. Upstream stripped (`void 0`) + stock mode -> no-op allowed
+  const rStock = applyPatches(SYNTH_BUNDLE, { indicatorMode: 'stock' });
+  assert.equal(rStock.results[4].mode, 'stock-empty');
+  assert.equal(rStock.output.includes('__AgyContextIndicator'), false);
+
+  // 2. Upstream native present (`{Indicator:NativeComp}`)
+  const withNative = SYNTH_BUNDLE.replace(
+    'contextUsageIndicator:void 0',
+    'contextUsageIndicator:{Indicator:NativeComp}'
+  );
+
+  // 2a. Default `custom` mode replaces native with our enhanced indicator
+  const rCustom = applyPatches(withNative, { indicatorMode: 'custom' });
+  assert.equal(rCustom.results[4].mode, 'enhanced-override');
+  assert.ok(rCustom.output.includes('__AgyContextIndicator'));
+  assert.equal(rCustom.output.includes('Indicator:NativeComp'), false);
+  assert.doesNotThrow(() => verifyJsSyntax(rCustom.output));
+
+  // 2b. `polyfill` mode leaves upstream native implementation untouched
+  const rPoly = applyPatches(withNative, { indicatorMode: 'polyfill' });
+  assert.equal(rPoly.results[4].mode, 'native-bypassed');
+  assert.ok(rPoly.output.includes('contextUsageIndicator:{Indicator:NativeComp}'));
+  assert.equal(rPoly.output.includes('__AgyContextIndicator'), false);
+
+  // 2c. Future build where upstream BOTH restored native `{Indicator:NativeComp}` AND refactored `$B` hook:
+  //     `custom` mode gracefully preserves native instead of breaking `pacman -Syu`
+  const refactoredNative = withNative.replace('optimisticState:d,trueState:f', 'refactoredFutureState:d');
+  const rFallback = applyPatches(refactoredNative, { indicatorMode: 'custom' });
+  assert.equal(rFallback.results[4].mode, 'native-fallback');
+  assert.ok(rFallback.output.includes('contextUsageIndicator:{Indicator:NativeComp}'));
+
+  // 2d. Stripped (`void 0`) with missing `$B` hook MUST still fail closed (exitCode 3)
+  const brokenStripped = SYNTH_BUNDLE.replace('optimisticState:d,trueState:f', 'refactoredFutureState:d');
+  assert.throws(
+    () => applyPatches(brokenStripped, { indicatorMode: 'custom' }),
+    (err) => err instanceof PatchError && err.exitCode === 3
+  );
+});
+
+test('__agyBindStorage seeds contextUsageIndicatorEnabled=true once when unset and respects user false', async () => {
+  const { output } = applyPatches(SYNTH_BUNDLE, { flags: FLAGS });
+  const diskStore = {};
+  const makeCtx = () =>
+    vm.createContext({
+      E: { ExperimentWithVariantSchema: 'SchemaStub' },
+      Wb: (_s, init) => ({ ...init }),
+      yia: 'OverrideSchema',
+      Uia: 'ReqSchema',
+      B: {},
+      nw: { createPortal: () => null },
+      HIc: () => null,
+      Uy: 'ButtonStub',
+      Rla: () => {},
+      f: (fn) => fn,
+      jh: () => ({}),
+      NMb: () => null,
+      Mla: class {},
+      e: (x) => x,
+      console,
+      setTimeout,
+      clearTimeout,
+      Promise,
+      window: {
+        localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+        nativeStorage: {
+          getItems: async () => ({ ...diskStore }),
+          updateItems: async (ch) => { Object.assign(diskStore, ch); },
+        },
+      },
+    });
+
+  // First launch on fresh profile -> seeds "true"
+  const c1 = makeCtx();
+  vm.runInContext(output, c1);
+  const { storageService: s1 } = await c1.hhd({});
+  assert.equal(diskStore.contextUsageIndicatorEnabled, 'true');
+
+  // User turns it OFF in Settings -> Appearance -> Chat Layout
+  await s1.store('contextUsageIndicatorEnabled', 'false');
+  assert.equal(diskStore.contextUsageIndicatorEnabled, 'false');
+
+  // Next launch -> MUST NOT overwrite user's "false"
+  const c2 = makeCtx();
+  vm.runInContext(output, c2);
+  await c2.hhd({});
+  assert.equal(diskStore.contextUsageIndicatorEnabled, 'false');
+});
+
+test('Context Indicator React component renders cleanly across empty/active/open states and persists Pin t/s toggle', async () => {
+  const { output } = applyPatches(SYNTH_BUNDLE, { flags: FLAGS });
+  const diskStore = {};
+  let currentConvState = { agentState: undefined };
+
+  // Minimal deterministic React hooks harness to verify unconditional hook order & VDOM output
+  const states = [];
+  const refs = [];
+  let hookCursor = 0;
+  const mockReact = {
+    Fragment: 'Fragment',
+    useState(init) {
+      const idx = hookCursor++;
+      if (!(idx in states)) states[idx] = typeof init === 'function' ? init() : init;
+      const set = (next) => {
+        states[idx] = typeof next === 'function' ? next(states[idx]) : next;
+      };
+      return [states[idx], set];
+    },
+    useRef(init) {
+      const idx = hookCursor++;
+      if (!(idx in refs)) refs[idx] = { current: init };
+      return refs[idx];
+    },
+    useMemo(fn) {
+      hookCursor++;
+      return fn();
+    },
+    useEffect() {
+      hookCursor++;
+    },
+    createElement(type, props, ...children) {
+      return { type, props: props || {}, children: children.flat() };
+    },
+  };
+
+  function renderOnce(Indicator) {
+    hookCursor = 0;
+    const tree = Indicator({ conversationId: 'conv-live' });
+    return { tree, hooksUsed: hookCursor };
+  }
+
+  function findNodes(node, pred, acc = []) {
+    if (!node || typeof node !== 'object') return acc;
+    if (pred(node)) acc.push(node);
+    if (Array.isArray(node.children)) {
+      for (const ch of node.children) findNodes(ch, pred, acc);
+    }
+    return acc;
+  }
+
+  function textOf(node) {
+    if (node === null || node === undefined || typeof node === 'boolean') return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(textOf).join('');
+    if (typeof node === 'object' && Array.isArray(node.children)) return node.children.map(textOf).join('');
+    return '';
+  }
+
+  const bundleWithLiveHook = output.replace(
+    'var $7a=a=>({optimisticState:{},trueState:{}})',
+    'var $7a=a=>({optimisticState:globalThis.__testConvState,trueState:globalThis.__testConvState})'
+  );
+
+  const ctx = vm.createContext({
+    __testConvState: currentConvState,
+    E: { ExperimentWithVariantSchema: 'SchemaStub', Model: {} },
+    Wb: (_s, init) => ({ ...init }),
+    yia: 'OverrideSchema',
+    Uia: 'ReqSchema',
+    B: mockReact,
+    nw: { createPortal: (el) => el },
+    HIc: () => null,
+    Uy: 'ButtonStub',
+    Rla: () => {},
+    f: (fn) => fn,
+    jh: () => ({}),
+    NMb: () => null,
+    Mla: class {},
+    e: (x) => x,
+    Date,
+    console,
+    setTimeout,
+    clearTimeout,
+    Promise,
+    document: { body: {} },
+    window: {
+      innerWidth: 1280,
+      innerHeight: 800,
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+      nativeStorage: {
+        getItems: async () => ({ ...diskStore }),
+        updateItems: async (ch) => { Object.assign(diskStore, ch); },
+      },
+    },
+  });
+  vm.runInContext(bundleWithLiveHook, ctx);
+  await ctx.hhd({});
+
+  const { Indicator } = ctx.__bootBindings.contextUsageIndicator;
+
+  // 1. Empty state -> returns null, records baseline hook count
+  const rEmpty = renderOnce(Indicator);
+  assert.equal(rEmpty.tree, null);
+  assert.ok(rEmpty.hooksUsed > 0);
+
+  // 2. Active conversation state -> renders trigger with "25%", identical hook count!
+  ctx.__testConvState = {
+    agentState: {
+      conversationId: 'conv-live',
+      contextWindowUsage: {
+        lastStepIndex: 1,
+        estimatedTokensUsed: 250000,
+        maxContextTokens: 1000000,
+        tokenGroups: [{ type: 7, numTokens: 200000 }],
+      },
+      trajectorySlice: {
+        stepsInSlice: [],
+        generatorMetadatasInSlice: [
+          {
+            stepIndices: [1],
+            metadata: {
+              case: 'chatModel',
+              value: {
+                responseModel: 'gemini-4-argon-b',
+                timeToFirstToken: { seconds: 1n, nanos: 0 },
+                streamingDuration: { seconds: 2n, nanos: 0 },
+                usage: {
+                  inputTokens: 200000n,
+                  outputTokens: 150n,
+                  thinkingOutputTokens: 100n,
+                  cacheReadTokens: 180000n,
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+  const rClosed = renderOnce(Indicator);
+  assert.equal(rClosed.hooksUsed, rEmpty.hooksUsed, 'hook count must stay invariant across null -> active');
+  const trigBtn = findNodes(rClosed.tree, (n) => n.props?.['data-testid'] === 'agy-context-usage-indicator')[0];
+  assert.ok(trigBtn);
+  assert.equal(textOf(trigBtn), '25%');
+
+  // 3. Click trigger + set pos -> opens dialog with model badge, 3x2 grid, and Pin t/s button
+  trigBtn.props.onClick();
+  states[4] = { position: 'fixed', zIndex: 9999, right: '16px', bottom: '48px' }; // `pos` state slot
+  const rOpen = renderOnce(Indicator);
+  assert.equal(rOpen.hooksUsed, rEmpty.hooksUsed, 'hook count must stay invariant when popover opens');
+  const dialog = findNodes(rOpen.tree, (n) => n.props?.role === 'dialog')[0];
+  assert.ok(dialog);
+  const fullText = textOf(dialog);
+  assert.ok(fullText.includes('gemini-4-argon-b'));
+  assert.ok(fullText.includes('75.0 tok/s'));
+  assert.ok(fullText.includes('90%'));
+
+  // 4. Click "Pin t/s" button -> persists preference to nativeStorage & updates bottom trigger to "25% · 75 t/s"
+  const pinBtn = findNodes(dialog, (n) => n.type === 'button' && textOf(n).includes('Pin t/s'))[0];
+  assert.ok(pinBtn);
+  pinBtn.props.onClick();
+  assert.equal(diskStore['agy.uipatch.indicatorPinTps'], 'true');
+
+  const rPinned = renderOnce(Indicator);
+  const trigAfter = findNodes(rPinned.tree, (n) => n.props?.['data-testid'] === 'agy-context-usage-indicator')[0];
+  assert.equal(textOf(trigAfter), '25% \u00b7 75 t/s');
 });

@@ -4,8 +4,8 @@
 > 1. **前端门控静态全量提取**：由 [`tools/inspect_flags.mjs`](../tools/inspect_flags.mjs) 从 `antigravity 2.31.0-1`（`Built at CL: 1017595969`）内嵌 Web UI（`main.js`）只读提取，共识别出 **27 处直读 / 次级 Mendel 字面量调用点（按 `reader+key` 去重后为 24 组，覆盖 23 个唯一实验键；另有 `enable-aux-pane-redesign` 经辅助函数间接传入同步读取器 `Hi`）** 与 **107 个 `FeatureManagerV2` `customFlag` 门控开关**。
 > 2. **Google OAuth 原生账号线上实测快照**：基线状态采集自隔离 Google 原生账号线上 `GetMendelFlags` 响应快照（共下发 **384** 项实验配置），并在 `2.31.0-1` 中逐键比对核实：全部 **`41` 项前端启用布尔开关**与 **`7` 项启用字符串/整数载荷配置**在 `2.31.0-1` 中均 100% 完整保留；`2.31` 新增的开关在表中单独标为 `🆕 2.31 新增`。
 > 3. **`antigravity-uipatch` 默认基线与持久化策略**：
->    - **企业网关 / 离线模式（`GetMendelFlags` 返回空表 `{}`）**：主/次双通道共用 `__agyResolveExperiments()` 清空旧缓存并默认注入实测观测到的 Google 原生账号线上开启项（`41` 项前端布尔开关 + `7` 项参数配置）及 **`enable-developer-mode`**（在 107 项 `customFlag` 中合计 **`32` 项默认开启**，初始面板显示 `0 overrides`）；
->    - **Google OAuth 原生账号模式（`GetMendelFlags` 非空）**：原样保留云端实时下发的完整实验表，仅额外开启 **`enable-developer-mode`**（单次拉取异常时自动保留 last-known-good）；
+>    - **企业网关 / 离线模式（`GetMendelFlags` 返回空表 `{}`）**：主/次双通道共用 `__agyResolveExperiments()` 清空旧缓存并默认注入实测观测到的 Google 原生账号线上开启项（`41` 项前端布尔开关 + `7` 项参数配置）及 **`enable-developer-mode` + `enable-context-usage-indicator`**（在 107 项 `customFlag` 中合计 **`33` 项默认开启**，初始面板显示 `0 overrides`）；
+>    - **Google OAuth 原生账号模式（`GetMendelFlags` 非空）**：原样保留云端实时下发的完整实验表，仅额外开启 **`enable-developer-mode` 与 `enable-context-usage-indicator`**（单次拉取异常时自动保留 last-known-good）；
 >    - **跨随机端口与重装软件包持久化**：所有在 `Settings -> Developer` 中的手动增减均经 `clientStorageFeature`（底层 `window.nativeStorage`）落盘至 `~/.config/Antigravity/app_storage.json`，并通过本工具绑定同步至全部直读与次级通道。
 
 ---
@@ -30,9 +30,9 @@
 
 ### 1.2 推荐按需增减的微调清单
 
-> [!IMPORTANT]
-> **`2.31.0-1` 重要变动说明（`enable-context-usage-indicator` 等组件在外部发行包中已被编译期剥离）**
-> 在 `antigravity 2.29.1-1` 中可正常使用的原生上下文窗口用量指示器（`enable-context-usage-indicator`），在 `2.31.0-1` 中被上游重命名为 `Context and Quota Indicator`（归属 `Appearance -> Chat Layout`），但 Google 在编译 `2.31.0-1` 外部发行版（`appType: "external"`）时将 `buildBindings.contextUsageIndicator`（连同 `codeSearch`、`enhancedFileViewer`）直接置为了 `void 0`——对应的 React 组件代码已在打包期被 Tree-Shake 剔除，且设置页过滤函数会将其强制拉入 `deniedSettings` 隐藏。因此在 `2.31.0-1` 下开启这几项开关均不会生效；若你依赖原生上下文用量指示器，请使用 `antigravity 2.29.1-1` 搭配本仓库 [`v2.29`](https://github.com/MatrixC7/antigravity-uipatch/tree/v2.29) 标签。
+> [!TIP]
+> **洁净室原创恢复与增强：`enable-context-usage-indicator`（`Context & Inference Indicator`）**
+> 在 `antigravity 2.30+ / 2.31.0-1` 外部发行版（`appType: "external"`）中，Google 将 `buildBindings.contextUsageIndicator`（连同 `codeSearch`、`enhancedFileViewer`）置为了 `void 0` 并剔除了原版实现。本工具通过第 5 处结构化补丁向该插槽挂载了 **100% 原创实现的增强指示器 `__AgyContextIndicator`**，同时默认开启 `enable-context-usage-indicator` 并自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 开关（支持查看 `TokenType` 细分占比、后端实际响应模型名、输出速率 `TPS` 与 `Pin t/s` 底栏常驻开关、`TTFT`、`Cache hit`、`Duration`、`Output` / `Thinking` Token 及静默重试角标）。其余两项（`enable-code-search-palette` 与 `enable-enhanced-file-viewer`）仍为空壳，开启不生效。
 
 #### 值得手动添加尝鲜的加分项（Google 原生账号与本工具基线默认均关闭）
 - **`enable-bottom-terminal-panel`**：允许将内置终端停靠在底部面板（配合形态 A 使用）
@@ -86,7 +86,7 @@
 
 ## 3. `FeatureManagerV2` 全部 107 项 `customFlag` 实测状态、默认基线与微调建议
 
-以下按功能域完整列出 `antigravity 2.31.0-1` 中的全部 **107** 项 `customFlag`（`17 + 23 + 28 + 39 = 107`；本工具网关基线默认开启其中 `31` 项 Google 原生开启项 + `enable-developer-mode`，共 **`32` 项默认开启**）。
+以下按功能域完整列出 `antigravity 2.31.0-1` 中的全部 **107** 项 `customFlag`（`17 + 23 + 28 + 39 = 107`；本工具网关基线默认开启其中 `31` 项 Google 原生开启项 + `enable-developer-mode` + `enable-context-usage-indicator`，共 **`33` 项默认开启**）。
 
 > **图例说明**：
 > - **Google 原生实测快照**：`✅ 开启`（`disabled: false`） / `❌ 关闭`（`disabled: true`） / `⚪ 未下发`（不在 384 项快照中，等效关闭） / `🆕 2.31 新增`（`2.31.0-1` 新引入的前端门控）
@@ -125,7 +125,7 @@
 | **`enable-conversation-selection-quoting`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | *(inline)* | **保持开启**：选中模型回复片段一键引用追问 |
 | **`enable-user-message-bubbles`** | ✅ **开启** | 🟢 **默认开启（原生基线）** | *(inline)* | **保持开启**：用户消息气泡化展示（若偏好纯扁平文档流可手动关闭） |
 | `enable-context-menu-system` | ✅ **开启** | 🟢 **默认开启（原生基线）** | `contextMenuSystem` | **保持开启**：应用级统一深色自定义右键菜单 |
-| `enable-context-usage-indicator` | ❌ 关闭 | ⚪ 默认关闭 | `contextUsageIndicator` | ⚠️ **`2.29` 可用 / `2.31` 已被上游剥离**：`2.31.0-1` 外部包将 `buildBindings.contextUsageIndicator` 置为 `void 0` 并拉入 `deniedSettings`，开启不生效（需该功能请用 `2.29` + `v2.29` 标签） |
+| **`enable-context-usage-indicator`** | ❌ 关闭 | 🟢 **默认开启（解锁项）** | `contextUsageIndicator` | **默认已挂载洁净室增强版 `__AgyContextIndicator`**：恢复 `Appearance -> Chat Layout` 开关，展示上下文 `TokenType` 细分、后端真实模型 ID、`TPS`（支持 `Pin t/s`）、`TTFT`、`Cache hit`、`Duration`、`Output` / `Thinking` 与重试角标 |
 | `enable-conversation-groups` | ❌ 关闭 | ⚪ 默认关闭 | `conversationGroups` | **按需尝鲜**：左侧边栏会话自定义分组整理 |
 | `enable-conversation-forking` | ❌ 关闭 | ⚪ 默认关闭 | *(inline)* | **推荐按需开启**：允许将当前会话分支派生（Fork）为新会话 |
 | `enable-fork-at-historical-step` | ❌ 关闭 | ⚪ 默认关闭 | *(inline)* | **推荐按需开启**：支持从任意历史步骤节点处分叉新会话（配合上一项） |

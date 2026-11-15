@@ -72,8 +72,8 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 
 `main.js` 中包含大量仅适用于 Google 内部环境（CitC / Cider / ABFS）或裁剪界面的开关（如 `project-4k` 会隐藏开发者工具），绝不能盲目全开。本工具采取最稳健的分层设计：
 
-1. **企业网关模式（`GetMendelFlags` 为空 `{}`）**：主通道与次级通道经共享解析器 `__agyResolveExperiments()` 识别出服务端空表，清空旧缓存并自动回退注入实测观测到的 **Google 原生账号线上开启基线**（41 项前端布尔开关 + 7 项参数配置，涵盖 `New Terminal`、V2 多标签右侧栏、`Extensions`、Git Diff 审查、PDF / Notebook 预览、分屏、全文搜索、快捷键自定义等）以及 **`enable-developer-mode`**；
-2. **Google 原生账号模式（`GetMendelFlags` 非空）**：原样保留云端实时下发的完整实验表（实测快照共 384 项），仅额外确保 `enable-developer-mode` 开启；若运行期间偶遇单次网络抖动导致拉取抛错，两条通道均自动保留上一次成功的实时表（last-known-good）；
+1. **企业网关模式（`GetMendelFlags` 为空 `{}`）**：主通道与次级通道经共享解析器 `__agyResolveExperiments()` 识别出服务端空表，清空旧缓存并自动回退注入实测观测到的 **Google 原生账号线上开启基线**（41 项前端布尔开关 + 7 项参数配置，涵盖 `New Terminal`、V2 多标签右侧栏、`Extensions`、Git Diff 审查、PDF / Notebook 预览、分屏、全文搜索、快捷键自定义等）以及 **`enable-developer-mode` 与 `enable-context-usage-indicator`**；
+2. **Google 原生账号模式（`GetMendelFlags` 非空）**：原样保留云端实时下发的完整实验表（实测快照共 384 项），仅额外确保 `enable-developer-mode` 与 `enable-context-usage-indicator` 开启；若运行期间偶遇单次网络抖动导致拉取抛错，两条通道均自动保留上一次成功的实时表（last-known-good）；
 3. **双向覆盖与实时响应**：在 `Settings -> Developer -> Custom Flags` 面板中，所有原生基线开启项初始均为默认开启态（`0 overrides`）。你可以随时手动**关掉**某项默认开关（标记 `forced off`，直读布尔通道同样实时生效），或通过底部向上展开的可滚动下拉框**添加**额外实验项（标记 `forced on`），点击 `Reset overrides` 即可随时一键回到纯净的 Google 原生基线。
 
 ---
@@ -104,6 +104,7 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 | **未灰度实验项（如 `fileExplorerTab`）** | 隐藏 | 隐藏 | **可在 `Developer` 面板按需添加** |
 | **手动修改开关的作用范围与持久化** | — | 面板隐藏；直读开关因 `SetMendelFlagOverrides` 权限拒绝无法本地覆盖 | **全通道实时响应覆盖，保存于 `~/.config/Antigravity/app_storage.json`，重启与重装均保留** |
 | **网络抖动时的实验表** | — | 原版主入口在失败时返回 `undefined`，下游保留已加载的表 | **主/次双通道在请求失败时均保留 last-known-good；服务端成功返回空表时清空旧缓存并采用静态基线** |
+| **上下文容量与推理遥测指示器** | `2.30+` 外部包已剥离为 `void 0` | `2.30+` 外部包已剥离为 `void 0` | **开箱默认挂载洁净室增强版（展示 `TokenType` 细分、真实响应模型、`TPS`/`Pin t/s`、`TTFT`、`Cache hit`、`Duration`、`Output`/`Thinking` 与重试角标）** |
 | **开关候选框滚动体验** | — | 原生 `<datalist>` 弹窗白底且**无法滚动** | **深色主题向上展开，支持滚轮 / 键盘导航 / 自动滚动入视区，含 ARIA listbox 语义** |
 | **误删/误覆盖防护** | — | — | **`--dry-run` 绝对零写入；`extract` 拒绝非空目录；UI 切换双失败时保留旧副本并给出恢复路径** |
 | **是否修改 `language_server` 二进制** | 否 | 否 | **否**（纯内存只读提取内嵌 ZIP） |

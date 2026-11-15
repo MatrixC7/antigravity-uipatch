@@ -249,6 +249,20 @@ export async function runLiveVerification(opts) {
     const jsText = jsRes.body.toString('utf8');
     verifyJsSyntax(jsText, 'served-main.js');
 
+    const metaPath = path.join(opts.uiDir, 'uipatch.json');
+    let indicatorPatchMode = 'enhanced';
+    if (fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+        const rec = Array.isArray(meta?.patches)
+          ? meta.patches.find((p) => p && p.id === 'context-usage-indicator')
+          : null;
+        if (rec?.mode) indicatorPatchMode = rec.mode;
+      } catch {}
+    }
+    const expectEnhancedIndicator =
+      indicatorPatchMode === 'enhanced' || indicatorPatchMode === 'enhanced-override';
+
     const expectedDecl = `var __AGY_UNLOCKED=${JSON.stringify(FLAGS)},__AGY_NATIVE_BOOLS=`;
     // These are *static bundle assertions*: they prove the patch text is present
     // in the served bundle. They are not a runtime proof that persistence works.
@@ -277,6 +291,14 @@ export async function runLiveVerification(opts) {
       ],
       ['picker ARIA listbox wiring (static)', jsText.includes('agy-flag-picker-listbox')],
       ['local-write notifier registered by provider (static)', jsText.includes('__agyRegisterNotifier(function()')],
+      [
+        expectEnhancedIndicator
+          ? 'enhanced Context & Inference Indicator mounted (static)'
+          : `context indicator mode=${indicatorPatchMode} (static)`,
+        expectEnhancedIndicator
+          ? jsText.includes('__AgyContextIndicator') && jsText.includes('agy.uipatch.indicatorPinTps')
+          : true,
+      ],
     ];
     for (const [label, ok] of checks) {
       if (!ok) throw new Error(`bundle assertion failed: ${label}`);

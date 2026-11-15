@@ -33,7 +33,7 @@
  *    is set in the environment. Without that variable, behavior is 100% stock.
  *    Repacking uses an append-only strategy that preserves every untouched entry
  *    (including any prior third-party `app.asar` patches) byte-for-byte.
- * 2. Extracted Web UI (`~/.local/share/antigravity-uipatch/`) with 4 structural
+ * 2. Extracted Web UI (`~/.local/share/antigravity-uipatch/`) with 5 structural
  *    choke-point patches in `main.js` (resolving Closure-minified identifiers by
  *    unique AST/property signatures and validating output via V8 `vm.Script`):
  *    - `mendel-native-baseline`: pre-hydrates `jetski.developer.customFlagOverrides`
@@ -41,9 +41,10 @@
  *      before resolving the primary Mendel fetcher (`Ola()`); when `GetMendelFlags`
  *      returns `{}` (Gateway Mode), seeds `MendelExperimentProvider` with the
  *      empirically verified Google Native OAuth baseline (41 boolean `ON` flags +
- *      7 string-payload flags) plus `enable-developer-mode`; when signed in with
- *      Google Native OAuth (`list.length > 0`), preserves the live server table
- *      intact and only ensures `enable-developer-mode` is ON.
+ *      7 string-payload flags) plus `FLAGS` (`enable-developer-mode` and
+ *      `enable-context-usage-indicator`); when signed in with Google Native OAuth
+ *      (`list.length > 0`), preserves the live server table intact and only
+ *      ensures `FLAGS` are ON.
  *    - `mendel-service-wrapper`: feeds the secondary `getMendelFlags` wrapper
  *      (`IT` / `JT` hooks) through the same resolver + normalizer.
  *    - `mendel-local-overrides`: binds `clientStorageFeature` (`hhd()`) and
@@ -53,6 +54,12 @@
  *    - `flag-picker-scrollable`: replaces the flag picker (`EGb()`) unscrollable,
  *      unthemed Chromium `<datalist>` popup with an upward-opening (`bottom-full mb-1`),
  *      scrollable (`max-h-64 overflow-y-auto`), keyboard-navigable ARIA combobox.
+ *    - `context-usage-indicator`: mounts a clean-room Context Window & Last-Turn
+ *      Inference Telemetry indicator (`__AgyContextIndicator`) into the host
+ *      `buildBindings.contextUsageIndicator` slot (stripped to `void 0` in 2.30+
+ *      external builds), displaying `TokenType` sub-group breakdown, actual
+ *      backend `responseModel`, output `TPS` (with optional toolbar pin toggle),
+ *      `TTFT`, `Cache hit`, `Duration`, `Output`, `Thinking` tokens, and retry badges.
  * 3. Desktop launcher switch (`~/.local/share/applications/antigravity.desktop`):
  *    adds `AGY_UI_BUNDLE=<ui-dir>` and refreshes KDE `ksycoca6`.
  *
@@ -101,7 +108,9 @@ process.noAsar = true;
 export const ENV_VAR = 'AGY_UI_BUNDLE';
 export const ASAR_TARGET = 'dist/languageServer.js';
 export const DEFAULT_INSTALL_DIR = '/opt/Antigravity';
-export const FLAGS = ['enable-developer-mode'];
+export const FLAGS = ['enable-developer-mode', 'enable-context-usage-indicator'];
+export const DEFAULT_INDICATOR_MODE = 'custom';
+export const INDICATOR_MODES = new Set(['custom', 'polyfill', 'stock']);
 
 /**
  * Empirically verified Google Native OAuth frontend boolean flags (`disabled: false`
@@ -921,7 +930,7 @@ export const PATCH_MENDEL_BASELINE = {
     const [fullMatch, fnName, pbCreate, reqSchema] = m;
     const expNs = resolveUniqueIdentifier(
       js,
-      /\b([A-Za-z0-9_$]+)\.ExperimentWithVariantSchema\b/g,
+      /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.ExperimentWithVariantSchema\b/g,
       'PATCH_MENDEL_BASELINE:ExperimentWithVariantSchema'
     );
     const allBools = Array.from(new Set([...boolFlags, ...flags]));
@@ -933,7 +942,7 @@ export const PATCH_MENDEL_BASELINE = {
       `__AGY_KEYS=["jetski.developer.customFlagOverrides","jetski.developer.featureEnvironmentOverride"],` +
       `__AGY_HYDRATE_TIMEOUT=2000,__AGY_BRIDGE_GRACE=8000,` +
       `__agyNotifiers=[],__agyOvrMap={},__agyOvrSig="[]",__agyOvrLoaded=!1,` +
-      `__agyStorageBound=!1,__agyLastGood=null,` +
+      `__agyStorageBound=!1,__agyStorageSvc=null,__agyLastGood=null,` +
       `__agyHydrateState="idle",__agyHydrateP=null,__agyFirstMiss=0;` +
       `function __agyRegisterNotifier(f){if(typeof f!=="function")return function(){};__agyNotifiers.push(f);` +
       `return function(){var i=__agyNotifiers.indexOf(f);if(i>=0)__agyNotifiers.splice(i,1)}}` +
@@ -951,11 +960,14 @@ export const PATCH_MENDEL_BASELINE = {
       // Bind Antigravity 2.31+'s `clientStorageFeature` (`storageService` backed
       // by `window.nativeStorage` -> `~/.config/Antigravity/app_storage.json`).
       `function __agyBindStorage(res){try{var s=res&&res.storageService;` +
-      `if(s&&typeof s.get==="function"){` +
+      `if(s&&typeof s.get==="function"){__agyStorageSvc=s;` +
       `if(typeof window!=="undefined"&&window.localStorage&&typeof s.store==="function"){` +
       `for(var i=0;i<__AGY_KEYS.length;i++){var k=__AGY_KEYS[i],cur=s.get(k);` +
       `if(cur===void 0||cur===null){var loc=window.localStorage.getItem(k);` +
       `if(typeof loc==="string")try{s.store(k,loc)}catch{}}}}` +
+      `if(typeof s.store==="function"&&__AGY_UNLOCKED.indexOf("enable-context-usage-indicator")!==-1){` +
+      `var ciCur=s.get("contextUsageIndicatorEnabled");` +
+      `if(ciCur===void 0||ciCur===null){try{s.store("contextUsageIndicatorEnabled","true")}catch{}}}` +
       `__agyStorageBound=!0;__agyHydrateState="done";__agySyncRawOvr(s.get(__AGY_OVR_KEY));` +
       `if(typeof s.onDidChange==="function"){s.onDidChange(function(ch){` +
       `if(ch&&Object.prototype.hasOwnProperty.call(ch,__AGY_OVR_KEY))__agySyncRawOvr(ch[__AGY_OVR_KEY])})}` +
@@ -1196,13 +1208,13 @@ function findMatchingBrace(js, open) {
  * unless the previous significant character makes division the only reading,
  * which is deliberately conservative: a false rejection fails the patch safely.
  */
-function assertSupportedConstruct(js, i) {
+function assertSupportedConstruct(js, i, label = 'PATCH_FLAG_PICKER') {
   const ch = js[i];
   if (ch !== '/') return;
   const next = js[i + 1];
   if (next === '/' || next === '*') {
     throw new PatchError(
-      'PATCH_FLAG_PICKER: comment inside flag picker is unsupported; refusing to guess',
+      `${label}: comment inside scanned region is unsupported; refusing to guess`,
       3
     );
   }
@@ -1213,7 +1225,7 @@ function assertSupportedConstruct(js, i) {
   const divisionSafe = /[A-Za-z0-9_$)\]}]/.test(prev);
   if (!divisionSafe) {
     throw new PatchError(
-      'PATCH_FLAG_PICKER: regex literal inside flag picker is unsupported; refusing to guess',
+      `${label}: regex literal inside scanned region is unsupported; refusing to guess`,
       3
     );
   }
@@ -1312,7 +1324,7 @@ export const PATCH_FLAG_PICKER = {
 
     const reactIdent = resolveUniqueIdentifier(
       replacedRegion,
-      /\b([A-Za-z0-9_$]+)\.createElement\(/g,
+      /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.createElement\(/g,
       'PATCH_FLAG_PICKER:React'
     );
     const [, buttonIdent] = matchUnique(
@@ -1329,16 +1341,754 @@ export const PATCH_FLAG_PICKER = {
   },
 };
 
+/**
+ * Locate a top-level property `propName` inside the object literal opening at
+ * `objOpen` (`js[objOpen] === '{'`) and return `{ valueStart, valueEnd }` for
+ * its value expression. Ignores nested `{...}`, `(...)`, `[...]` and quoted
+ * strings while rejecting comments and regex literals via `assertSupportedConstruct`.
+ */
+function findTopLevelObjectProperty(js, objOpen, propName) {
+  if (js[objOpen] !== '{') {
+    throw new PatchError('PATCH_CONTEXT_INDICATOR: expected opening brace for buildBindings', 3);
+  }
+  const propRe = new RegExp(`\\b${propName}\\s*:`, 'g');
+  const tailOccurrences = [...js.slice(objOpen).matchAll(propRe)].length;
+  if (tailOccurrences !== 1) {
+    throw new PatchError(
+      `PATCH_CONTEXT_INDICATOR: expected 1 ${propName} property in buildBindings, found ${tailOccurrences}`,
+      3
+    );
+  }
+
+  let depth = 0;
+  let quote = null;
+  let expectKey = true;
+
+  for (let i = objOpen; i < js.length; i += 1) {
+    const ch = js[i];
+    if (quote) {
+      if (ch === '\\') { i += 1; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    assertSupportedConstruct(js, i, 'PATCH_CONTEXT_INDICATOR');
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+
+    if (ch === '{' || ch === '(' || ch === '[') {
+      depth += 1;
+      if (depth === 1 && ch === '{') expectKey = true;
+      continue;
+    }
+    if (ch === '}' || ch === ')' || ch === ']') {
+      if (depth === 1 && ch === '}') {
+        break;
+      }
+      depth -= 1;
+      if (depth < 0) {
+        throw new PatchError('PATCH_CONTEXT_INDICATOR: unbalanced delimiters in buildBindings', 3);
+      }
+      continue;
+    }
+
+    if (depth === 1) {
+      if (ch === ',') {
+        expectKey = true;
+        continue;
+      }
+      if (expectKey && !/\s/.test(ch)) {
+        expectKey = false;
+        let endKey = i;
+        while (endKey < js.length && /[A-Za-z0-9_$]/.test(js[endKey])) endKey += 1;
+        const key = js.slice(i, endKey);
+        let colon = endKey;
+        while (colon < js.length && /\s/.test(js[colon])) colon += 1;
+        if (key === propName && js[colon] === ':') {
+          let valueStart = colon + 1;
+          while (valueStart < js.length && /\s/.test(js[valueStart])) valueStart += 1;
+          const valueEnd = findObjectPropertyValueEnd(js, valueStart);
+          if (valueEnd === -1) {
+            throw new PatchError(
+              `PATCH_CONTEXT_INDICATOR: unbalanced value expression for ${propName}`,
+              3
+            );
+          }
+          return { valueStart, valueEnd };
+        }
+        i = Math.max(i, endKey - 1);
+      }
+    }
+  }
+
+  throw new PatchError(
+    `PATCH_CONTEXT_INDICATOR: top-level ${propName} property not found in buildBindings`,
+    3
+  );
+}
+
+function findObjectPropertyValueEnd(js, valueStart) {
+  let depth = 0;
+  let quote = null;
+  for (let i = valueStart; i < js.length; i += 1) {
+    const ch = js[i];
+    if (quote) {
+      if (ch === '\\') { i += 1; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    assertSupportedConstruct(js, i, 'PATCH_CONTEXT_INDICATOR');
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '{' || ch === '(' || ch === '[') {
+      depth += 1;
+    } else if (ch === '}' || ch === ')' || ch === ']') {
+      if (depth === 0) return ch === '}' ? i : -1;
+      depth -= 1;
+    } else if (ch === ',' && depth === 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function buildContextIndicatorSource({
+  reactIdent,
+  portalNs,
+  useConvStateSym,
+  cortexNs,
+  commonNs,
+}) {
+  const R = reactIdent;
+  return `(function(){
+  var PIN_KEY="agy.uipatch.indicatorPinTps",
+      SUB_KEY="agy.uipatch.indicatorSubOpen",
+      CIRC=2*Math.PI*6,
+      CTX_SEL={selector:function(s){return s?s.agentState:void 0}},
+      prefSubs=[];
+  function readPref(k,defVal){
+    try{
+      if(typeof __agyStorageSvc!=="undefined"&&__agyStorageSvc&&typeof __agyStorageSvc.get==="function"){
+        var sv=__agyStorageSvc.get(k);
+        if(sv==="true")return !0;
+        if(sv==="false")return !1;
+      }
+      if(typeof window!=="undefined"&&window.localStorage){
+        var lv=window.localStorage.getItem(k);
+        if(lv==="true")return !0;
+        if(lv==="false")return !1;
+      }
+    }catch{}
+    return defVal;
+  }
+  function writePref(k,val){
+    var s=val?"true":"false";
+    try{
+      if(typeof __agyStorageSvc!=="undefined"&&__agyStorageSvc&&typeof __agyStorageSvc.store==="function"){
+        __agyStorageSvc.store(k,s);
+      }
+    }catch{}
+    try{
+      if(typeof window!=="undefined"&&window.localStorage){
+        window.localStorage.setItem(k,s);
+      }
+    }catch{}
+    for(var i=0;i<prefSubs.length;i++){try{prefSubs[i]()}catch{}}
+  }
+  function num(v){
+    if(typeof v==="bigint")return Number(v);
+    if(typeof v==="number")return Number.isFinite(v)?v:0;
+    if(typeof v==="string"&&v){var n=Number(v);return Number.isFinite(n)?n:0}
+    return 0;
+  }
+  function durSec(d){
+    if(!d||typeof d!=="object")return 0;
+    var s=num(d.seconds)+num(d.nanos)/1e9;
+    return s>0&&Number.isFinite(s)?s:0;
+  }
+  function tsMs(t){
+    if(!t||typeof t!=="object")return 0;
+    var ms=num(t.seconds)*1e3+num(t.nanos)/1e6;
+    return ms>0&&Number.isFinite(ms)?ms:0;
+  }
+  function fmtK(n){
+    if(n>=1e6)return (n/1e6).toFixed(2)+"M";
+    if(n>=1e3)return (n/1e3).toFixed(1)+"K";
+    return String(Math.round(n));
+  }
+  function fmtExact(n){
+    try{return Math.round(n).toLocaleString("en-US")}catch{return String(Math.round(n))}
+  }
+  function fmtPct(part,tot){
+    if(tot<=0||part<=0)return "0.0%";
+    var p=(part/tot)*100;
+    return p<0.1?"<0.1%":p.toFixed(1)+"%";
+  }
+  function fmtSec(s,trailingEllipsis){
+    if(!(s>0)||!Number.isFinite(s))return "\\u2014";
+    var txt=s<10?s.toFixed(2)+"s":s.toFixed(1)+"s";
+    return trailingEllipsis?txt+"\\u2026":txt;
+  }
+  function cleanModel(raw){
+    if(!raw||typeof raw!=="string")return "";
+    return raw
+      .replace(/^projects\\/[^/]+\\/locations\\/[^/]+\\/publishers\\/[^/]+\\/models\\//,"")
+      .replace(/^publishers\\/[^/]+\\/models\\//,"")
+      .replace(/^models\\//,"");
+  }
+  function resolveModelInfo(cm,lastPr){
+    var raw=(cm&&(cm.responseModelFull||cm.responseModel))||"";
+    if(raw)return {short:cleanModel(raw),raw:raw};
+    var disp=(cm&&cm.modelDisplayName)||(lastPr&&lastPr.metadata&&lastPr.metadata.modelInfo&&lastPr.metadata.modelInfo.label)||"";
+    if(disp)return {short:disp,raw:disp};
+    var code=(cm&&cm.model)||(lastPr&&lastPr.metadata&&lastPr.metadata.generatorModel);
+    var MD=${commonNs}&&${commonNs}.Model;
+    if(code&&MD&&typeof MD[code]==="string"&&MD[code].indexOf("UNSPECIFIED")===-1){
+      var pretty=MD[code].replace(/^MODEL_/,"").toLowerCase().replace(/_/g,"-");
+      return {short:pretty,raw:MD[code]};
+    }
+    return {short:"",raw:""};
+  }
+  function deriveContextMetrics(agentState,tracker,nowMs){
+    var cwu=agentState&&agentState.contextWindowUsage;
+    if(!cwu)return null;
+    var used=num(cwu.estimatedTokensUsed),max=num(cwu.maxContextTokens);
+    if(max<=0||used<=0)return null;
+    var TT=(${cortexNs}&&${cortexNs}.TokenType)||{},
+        CS=(${cortexNs}&&${cortexNs}.CortexStepStatus)||{},
+        chatType=TT.CHAT_MESSAGES!==void 0?TT.CHAT_MESSAGES:7,
+        doneStatus=CS.DONE!==void 0?CS.DONE:3,
+        genStatus=CS.GENERATING!==void 0?CS.GENERATING:8,
+        runStatus=CS.RUNNING!==void 0?CS.RUNNING:2;
+    var rawChat=0,buckets={sys:0,tools:0,mcp:0,rules:0,agents:0,other:0};
+    var tgs=Array.isArray(cwu.tokenGroups)?cwu.tokenGroups:[];
+    for(var i=0;i<tgs.length;i++){
+      var g=tgs[i];
+      if(!g)continue;
+      var gt=g.type,gn=num(g.numTokens);
+      if(gn<=0)continue;
+      if(gt===chatType){rawChat+=gn;continue}
+      if(gt===(TT.SYSTEM_PROMPT!==void 0?TT.SYSTEM_PROMPT:1))buckets.sys+=gn;
+      else if(gt===(TT.TOOLS!==void 0?TT.TOOLS:2))buckets.tools+=gn;
+      else if(gt===(TT.MCP_TOOLS!==void 0?TT.MCP_TOOLS:4))buckets.mcp+=gn;
+      else if(gt===(TT.RULES!==void 0?TT.RULES:3)||gt===(TT.SKILLS!==void 0?TT.SKILLS:5)||gt===(TT.WORKFLOWS!==void 0?TT.WORKFLOWS:8))buckets.rules+=gn;
+      else if(gt===(TT.SUBAGENTS!==void 0?TT.SUBAGENTS:6)||gt===(TT.PLUGINS!==void 0?TT.PLUGINS:9)||gt===(TT.FLOWS!==void 0?TT.FLOWS:10))buckets.agents+=gn;
+      else buckets.other+=gn;
+    }
+    var chat=Math.min(used,Math.max(0,rawChat)),
+        sys=Math.max(0,used-chat),
+        free=Math.max(0,max-used),
+        frac=Math.min(1,Math.max(0,used/max));
+    var groups=[];
+    if(buckets.sys>0)groups.push(["System",buckets.sys]);
+    if(buckets.tools>0)groups.push(["Tools",buckets.tools]);
+    if(buckets.mcp>0)groups.push(["MCP",buckets.mcp]);
+    if(buckets.rules>0)groups.push(["Rules/Skills",buckets.rules]);
+    if(buckets.agents>0)groups.push(["Agents/Plugins",buckets.agents]);
+    if(buckets.other>0)groups.push(["Other",buckets.other]);
+    var slice=agentState.trajectorySlice,
+        steps=(slice&&Array.isArray(slice.stepsInSlice))?slice.stepsInSlice:[],
+        lastStepIdx=num(cwu.lastStepIndex),
+        approx=Boolean(cwu.estimatedAfterCompaction);
+    if(!approx){
+      for(var k=steps.length-1;k>=0;k--){
+        var st=steps[k];
+        if(!st)continue;
+        var sIdx=st.metadata&&st.metadata.sourceTrajectoryStepInfo&&st.metadata.sourceTrajectoryStepInfo.stepIndex!==void 0
+          ?num(st.metadata.sourceTrajectoryStepInfo.stepIndex):-1;
+        if(sIdx>=0&&sIdx<lastStepIdx)break;
+        if(sIdx>=lastStepIdx&&st.step&&st.step.case==="checkpoint"&&st.status===doneStatus&&!(st.step.value&&st.step.value.intentOnly)){
+          approx=!0;break;
+        }
+      }
+    }
+    var lastPr=null,lastPrIdx=-1;
+    for(var p=steps.length-1;p>=0;p--){
+      var cand=steps[p];
+      if(cand&&cand.step&&cand.step.case==="plannerResponse"){
+        lastPr=cand;
+        lastPrIdx=cand.metadata&&cand.metadata.sourceTrajectoryStepInfo&&cand.metadata.sourceTrajectoryStepInfo.stepIndex!==void 0
+          ?num(cand.metadata.sourceTrajectoryStepInfo.stepIndex):p;
+        break;
+      }
+    }
+    var gens=(slice&&Array.isArray(slice.generatorMetadatasInSlice))?slice.generatorMetadatasInSlice:[],
+        gen=null,cm=null;
+    for(var q=gens.length-1;q>=0;q--){
+      var gItem=gens[q];
+      var gCm=gItem&&gItem.metadata&&gItem.metadata.case==="chatModel"?gItem.metadata.value:(gItem&&gItem.chatModel);
+      if(gCm){gen=gItem;cm=gCm;break}
+    }
+    var isGen=Boolean(lastPr&&(lastPr.status===genStatus||lastPr.status===runStatus)),
+        genMatchesPr=Boolean(gen&&Array.isArray(gen.stepIndices)&&lastPrIdx>=0&&gen.stepIndices.indexOf(lastPrIdx)!==-1),
+        activeCm=(!isGen||genMatchesPr)?cm:null,
+        u=(activeCm&&activeCm.usage)||(!isGen&&lastPr&&lastPr.metadata&&lastPr.metadata.modelUsage)||null,
+        exactOut=num(u&&u.outputTokens),
+        exactThink=num(u&&u.thinkingOutputTokens),
+        exactResp=num(u&&u.responseOutputTokens);
+    if(exactOut===0&&(exactThink>0||exactResp>0))exactOut=exactThink+exactResp;
+    var mdl=resolveModelInfo(activeCm||cm,lastPr),
+        now=nowMs||Date.now(),
+        telemetry=null;
+    if(isGen&&exactOut===0){
+      var pv=(lastPr&&lastPr.step&&lastPr.step.value)||{},
+          thkStr=String(pv.rawThinking||pv.thinking||""),
+          repStr=String(pv.response||""),
+          totChars=thkStr.length+repStr.length,
+          tKey=String(agentState.conversationId||"")+":"+String(lastPrIdx);
+      if(tracker){
+        if(tracker.key!==tKey){tracker.key=tKey;tracker.startMs=totChars>0?now:0}
+        else if(totChars>0&&!tracker.startMs){tracker.startMs=now}
+      }
+      var stepStart=tsMs(lastPr&&lastPr.metadata&&lastPr.metadata.startedAt)||tsMs(lastPr&&lastPr.metadata&&lastPr.metadata.createdAt)||(tracker&&tracker.startMs)||0,
+          firstChunk=tsMs(lastPr&&lastPr.metadata&&lastPr.metadata.viewableAt)||(tracker&&tracker.startMs)||0,
+          estOut=totChars>0?Math.max(1,Math.round(totChars/4)):0,
+          estThink=thkStr.length>0?Math.max(1,Math.round(thkStr.length/4)):0,
+          streamEl=firstChunk>0&&now>firstChunk?(now-firstChunk)/1e3:0,
+          liveTps=estOut>0&&streamEl>=0.25?estOut/streamEl:0,
+          liveTtft=durSec(activeCm&&activeCm.timeToFirstToken)||(stepStart>0&&firstChunk>stepStart?(firstChunk-stepStart)/1e3:0),
+          liveDur=stepStart>0&&now>stepStart?(now-stepStart)/1e3:streamEl,
+          inTokL=num(u&&u.inputTokens),
+          cacheL=num(u&&u.cacheReadTokens),
+          cachePctL=inTokL>0&&cacheL>0?Math.min(100,(cacheL/inTokL)*100):null,
+          retL=num(activeCm&&activeCm.retries)||(activeCm&&Array.isArray(activeCm.retryInfos)?activeCm.retryInfos.length:0);
+      telemetry={
+        streaming:!0,tpsApprox:!0,model:mdl.short,rawModel:mdl.raw,
+        tps:liveTps,ttftSec:liveTtft,durSec:liveDur,
+        inTok:inTokL,cacheRead:cacheL,cachePct:cachePctL,
+        outTok:estOut,thinkTok:estThink,thinkDurSec:0,
+        retries:retL,retryWaitSec:0
+      };
+    }else if(activeCm||u||lastPr){
+      var ttft=durSec(activeCm&&activeCm.timeToFirstToken),
+          sSec=durSec(activeCm&&activeCm.streamingDuration);
+      if(!(sSec>0)&&lastPr&&lastPr.metadata){
+        var t0=tsMs(lastPr.metadata.viewableAt)||tsMs(lastPr.metadata.startedAt)||tsMs(lastPr.metadata.createdAt),
+            t1=tsMs(lastPr.metadata.finishedGeneratingAt)||tsMs(lastPr.metadata.completedAt);
+        if(t1>t0)sSec=(t1-t0)/1e3;
+      }
+      var totDur=ttft>0&&sSec>0?(ttft+sSec):(sSec>0?sSec:ttft);
+      if(!(totDur>0)&&lastPr&&lastPr.metadata){
+        var w0=tsMs(lastPr.metadata.startedAt)||tsMs(lastPr.metadata.createdAt),
+            w1=tsMs(lastPr.metadata.completedAt)||tsMs(lastPr.metadata.finishedGeneratingAt);
+        if(w1>w0)totDur=(w1-w0)/1e3;
+      }
+      var exactTps=exactOut>0&&sSec>0.02?exactOut/sSec:0,
+          inTok=num(u&&u.inputTokens),
+          cacheRead=num(u&&u.cacheReadTokens),
+           hasCacheField=Boolean(u&&(cacheRead>0||u.cacheReadTokens!==void 0)),
+          cachePct=inTok>0&&hasCacheField?Math.min(100,(cacheRead/inTok)*100):null,
+          rInfos=(activeCm&&Array.isArray(activeCm.retryInfos))?activeCm.retryInfos:((lastPr&&lastPr.metadata&&Array.isArray(lastPr.metadata.retryInfos))?lastPr.metadata.retryInfos:[]),
+          retries=Math.max(num(activeCm&&activeCm.retries),rInfos.length),
+          rWait=0;
+      for(var rw=0;rw<rInfos.length;rw++)rWait+=durSec(rInfos[rw]&&rInfos[rw].waitTime);
+      var thkDur=durSec(lastPr&&lastPr.step&&lastPr.step.value&&lastPr.step.value.thinkingDuration);
+      if(mdl.short||exactOut>0||ttft>0||totDur>0||cachePct!==null||retries>0){
+        telemetry={
+          streaming:!1,tpsApprox:!1,model:mdl.short,rawModel:mdl.raw,
+          tps:exactTps,ttftSec:ttft,durSec:totDur,
+          inTok:inTok,cacheRead:cacheRead,cachePct:cachePct,
+          outTok:exactOut,thinkTok:exactThink,thinkDurSec:thkDur,
+          retries:retries,retryWaitSec:rWait
+        };
+      }
+    }
+    return {
+      used:used,max:max,frac:frac,isWarn:frac>=0.8,approx:approx,
+      sys:sys,chat:chat,free:free,groups:groups,t:telemetry
+    };
+  }
+  function __AgyContextIndicator(props){
+    var convId=props&&props.conversationId,
+        agentState=${useConvStateSym}(convId,CTX_SEL),
+        [open,setOpen]=${R}.useState(!1),
+        [copied,setCopied]=${R}.useState(!1),
+        [tick,setTick]=${R}.useState(0),
+        [,setPrefVer]=${R}.useState(0),
+        [pos,setPos]=${R}.useState(null),
+        trigRef=${R}.useRef(null),
+        popRef=${R}.useRef(null),
+        trackerRef=${R}.useRef({key:"",startMs:0}),
+        copyTimerRef=${R}.useRef(null);
+    var m=${R}.useMemo(function(){
+      return deriveContextMetrics(agentState,trackerRef.current,Date.now());
+    },[agentState,tick]);
+    var isStreaming=Boolean(m&&m.t&&m.t.streaming);
+    ${R}.useEffect(function(){
+      function fn(){setPrefVer(function(v){return v+1})}
+      prefSubs.push(fn);
+      return function(){var i=prefSubs.indexOf(fn);if(i>=0)prefSubs.splice(i,1)};
+    },[]);
+    ${R}.useEffect(function(){
+      if(!isStreaming||typeof setInterval!=="function")return;
+      var id=setInterval(function(){setTick(function(v){return v+1})},500);
+      return function(){clearInterval(id)};
+    },[isStreaming]);
+    ${R}.useEffect(function(){
+      if(!open||typeof window==="undefined"||typeof document==="undefined")return;
+      function syncPos(){
+        if(!trigRef.current)return;
+        var r=trigRef.current.getBoundingClientRect(),
+            rightPx=Math.max(8,Math.round(window.innerWidth-r.right)),
+            above=r.top>=300||r.top>=window.innerHeight-r.bottom;
+        setPos(above
+          ?{position:"fixed",zIndex:9999,right:rightPx+"px",bottom:Math.round(window.innerHeight-r.top+8)+"px"}
+          :{position:"fixed",zIndex:9999,right:rightPx+"px",top:Math.round(r.bottom+8)+"px"});
+      }
+      function onDown(e){
+        if(trigRef.current&&trigRef.current.contains(e.target))return;
+        if(popRef.current&&popRef.current.contains(e.target))return;
+        setOpen(!1);
+      }
+      function onKey(e){if(e.key==="Escape")setOpen(!1)}
+      syncPos();
+      document.addEventListener("mousedown",onDown);
+      document.addEventListener("keydown",onKey);
+      window.addEventListener("resize",syncPos);
+      window.addEventListener("scroll",syncPos,!0);
+      return function(){
+        document.removeEventListener("mousedown",onDown);
+        document.removeEventListener("keydown",onKey);
+        window.removeEventListener("resize",syncPos);
+        window.removeEventListener("scroll",syncPos,!0);
+      };
+    },[open]);
+    ${R}.useEffect(function(){
+      return function(){if(copyTimerRef.current)clearTimeout(copyTimerRef.current)};
+    },[]);
+    if(!m)return null;
+    var pinTps=readPref(PIN_KEY,!1),
+        subOpen=readPref(SUB_KEY,!0),
+        prefix=m.approx?"~":"",
+        pctRound=Math.round(m.frac*100),
+        warnCol="var(--warning, #d97706)",
+        chatCol=m.isWarn?warnCol:"color-mix(in srgb, var(--primary) 82%, var(--foreground))",
+        sysCol="color-mix(in srgb, var(--foreground) 78%, transparent)",
+        t=m.t,
+        hasTps=Boolean(t&&t.tps>0),
+        shortTps=hasTps?(t.tpsApprox?"~":"")+Math.round(t.tps)+" t/s":"",
+        trigLabel=pinTps&&shortTps?(prefix+pctRound+"% \\u00b7 "+shortTps):(prefix+pctRound+"%"),
+        hasGroups=m.groups.length>0;
+    function onCopyModel(){
+      if(!t||!t.rawModel)return;
+      try{
+        if(typeof navigator!=="undefined"&&navigator.clipboard&&navigator.clipboard.writeText){
+          navigator.clipboard.writeText(t.rawModel);
+        }
+      }catch{}
+      setCopied(!0);
+      if(copyTimerRef.current)clearTimeout(copyTimerRef.current);
+      copyTimerRef.current=setTimeout(function(){setCopied(!1)},1200);
+    }
+    var popoverEl=open&&pos&&typeof document!=="undefined"&&document.body?${portalNs}.createPortal(
+      ${R}.createElement("div",{
+        ref:popRef,
+        role:"dialog",
+        "aria-label":"Context window usage and inference telemetry",
+        className:"bg-card border border-border rounded-lg shadow-lg text-xs text-foreground select-none",
+        style:Object.assign({},pos,{width:"22.5rem",maxWidth:"calc(100vw - 16px)",padding:"12px"})
+      },
+        ${R}.createElement("div",{className:"flex items-center justify-between",style:{gap:"8px",marginBottom:"6px"}},
+          ${R}.createElement("div",{className:"flex items-center",style:{gap:"6px"}},
+            ${R}.createElement("span",{className:"font-semibold text-foreground"},"Context Window"),
+            m.approx&&${R}.createElement("span",{
+              className:"bg-secondary text-muted-foreground rounded text-xs",
+              title:"Approximate post-compaction token estimate",
+              style:{padding:"1px 6px"}
+            },"~ Approx")
+          ),
+          ${R}.createElement("div",{className:"flex items-center",style:{gap:"8px"}},
+            ${R}.createElement("button",{
+              type:"button",
+              onClick:function(){writePref(PIN_KEY,!pinTps)},
+              title:"Pin output speed (t/s) next to percentage in the bottom toolbar",
+              className:"rounded border text-xs cursor-pointer "+(pinTps?"bg-secondary border-border text-foreground font-medium":"text-muted-foreground"),
+              style:{padding:"1px 6px",borderColor:pinTps?void 0:"transparent"}
+            },pinTps?"Pin t/s: ON":"Pin t/s"),
+            ${R}.createElement("span",{
+              className:"font-semibold tabular-nums",
+              style:{color:m.isWarn?warnCol:"var(--foreground)"}
+            },prefix+(m.frac*100).toFixed(1)+"%")
+          )
+        ),
+        ${R}.createElement("div",{
+          className:"bg-secondary rounded-full flex",
+          style:{width:"100%",height:"8px",overflow:"hidden",marginBottom:"6px"}
+        },
+          ${R}.createElement("div",{style:{height:"100%",width:((m.sys/m.max)*100).toFixed(2)+"%",background:sysCol}}),
+          ${R}.createElement("div",{style:{height:"100%",width:((m.chat/m.max)*100).toFixed(2)+"%",background:chatCol}})
+        ),
+        ${R}.createElement("div",{
+          className:"text-xs text-muted-foreground tabular-nums",
+          title:fmtExact(m.used)+" / "+fmtExact(m.max)+" tokens",
+          style:{marginBottom:"8px"}
+        },prefix+fmtK(m.used)+" / "+fmtK(m.max)+" tokens used"),
+        ${R}.createElement("div",{
+          className:"flex flex-col border-border",
+          style:{gap:"4px",paddingTop:"6px",borderTopWidth:"1px",borderTopStyle:"solid"}
+        },
+          ${R}.createElement("div",null,
+            ${R}.createElement("button",{
+              type:"button",
+              onClick:function(){if(hasGroups)writePref(SUB_KEY,!subOpen)},
+              className:"flex items-center justify-between text-foreground "+(hasGroups?"cursor-pointer":"") ,
+              style:{width:"100%",padding:"2px 0",background:"transparent"}
+            },
+              ${R}.createElement("span",{className:"flex items-center",style:{gap:"6px"}},
+                ${R}.createElement("span",{className:"rounded shrink-0",style:{display:"inline-block",width:"8px",height:"8px",background:sysCol}}),
+                ${R}.createElement("span",null,"Instructions & tools"),
+                hasGroups&&${R}.createElement("span",{className:"text-muted-foreground text-xs"},subOpen?"\\u25be":"\\u25b8")
+              ),
+              ${R}.createElement("span",{className:"tabular-nums text-muted-foreground"},fmtK(m.sys)+" \\u00b7 "+fmtPct(m.sys,m.max))
+            ),
+            hasGroups&&subOpen&&${R}.createElement("div",{
+              className:"border-border",
+              style:{
+                display:"grid",gridTemplateColumns:"1fr 1fr",columnGap:"12px",rowGap:"2px",
+                marginTop:"4px",marginLeft:"14px",paddingLeft:"10px",
+                borderLeftWidth:"1px",borderLeftStyle:"solid"
+              }
+            },m.groups.map(function(pair){
+              return ${R}.createElement("div",{key:pair[0],className:"flex items-center justify-between text-xs text-muted-foreground"},
+                ${R}.createElement("span",{className:"truncate"},pair[0]),
+                ${R}.createElement("span",{className:"tabular-nums"},fmtK(pair[1]))
+              );
+            }))
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",style:{padding:"2px 0"}},
+            ${R}.createElement("span",{className:"flex items-center text-foreground",style:{gap:"6px"}},
+              ${R}.createElement("span",{className:"rounded shrink-0",style:{display:"inline-block",width:"8px",height:"8px",background:chatCol}}),
+              ${R}.createElement("span",null,"Conversation")
+            ),
+            ${R}.createElement("span",{className:"tabular-nums text-muted-foreground"},fmtK(m.chat)+" \\u00b7 "+fmtPct(m.chat,m.max))
+          ),
+          ${R}.createElement("div",{className:"flex items-center justify-between",style:{padding:"2px 0"}},
+            ${R}.createElement("span",{className:"flex items-center text-muted-foreground",style:{gap:"6px"}},
+              ${R}.createElement("span",{className:"rounded shrink-0 border border-border bg-secondary",style:{display:"inline-block",width:"8px",height:"8px"}}),
+              ${R}.createElement("span",null,"Available")
+            ),
+            ${R}.createElement("span",{className:"tabular-nums text-muted-foreground"},fmtK(m.free)+" \\u00b7 "+fmtPct(m.free,m.max))
+          )
+        ),
+        t&&${R}.createElement("div",{
+          className:"flex flex-col border-border",
+          style:{marginTop:"10px",paddingTop:"8px",gap:"6px",borderTopWidth:"1px",borderTopStyle:"solid"}
+        },
+          ${R}.createElement("div",{className:"flex items-center justify-between",style:{gap:"6px"}},
+            ${R}.createElement("div",{className:"flex items-center",style:{gap:"6px",minWidth:0}},
+              ${R}.createElement("span",{className:"text-muted-foreground font-medium shrink-0"},t.streaming?"Generating":"Last Turn"),
+              t.retries>0&&${R}.createElement("span",{
+                className:"rounded text-xs font-medium tabular-nums shrink-0",
+                title:t.retryWaitSec>0
+                  ?("Backend auto-retried "+t.retries+" time(s), waited "+fmtSec(t.retryWaitSec,!1))
+                  :("Backend auto-retried "+t.retries+" time(s)"),
+                style:{padding:"1px 6px",color:warnCol,background:"color-mix(in srgb, "+warnCol+" 14%, transparent)"}
+              },"\\u21bb "+t.retries+(t.retries===1?" retry":" retries"))
+            ),
+            t.model&&${R}.createElement("button",{
+              type:"button",
+              onClick:onCopyModel,
+              title:(t.rawModel||t.model)+" (click to copy)",
+              className:"bg-secondary border border-border rounded font-mono text-xs text-foreground truncate cursor-pointer",
+              style:{padding:"1px 6px",maxWidth:"12.5rem"}
+            },copied?"Copied!":t.model)
+          ),
+          ${R}.createElement("div",{
+            className:"text-xs tabular-nums",
+            style:{display:"grid",gridTemplateColumns:"1fr 1fr",columnGap:"14px",rowGap:"4px"}
+          },
+            ${R}.createElement("div",{className:"flex items-center justify-between"},
+              ${R}.createElement("span",{className:"text-muted-foreground"},"Speed"),
+              ${R}.createElement("span",{className:"font-medium text-foreground"},t.tps>0?((t.tpsApprox?"~":"")+t.tps.toFixed(1)+" tok/s"):"\\u2014")
+            ),
+            ${R}.createElement("div",{className:"flex items-center justify-between"},
+              ${R}.createElement("span",{className:"text-muted-foreground"},"TTFT"),
+              ${R}.createElement("span",{className:"text-foreground"},fmtSec(t.ttftSec,!1))
+            ),
+            ${R}.createElement("div",{
+              className:"flex items-center justify-between",
+              title:t.inTok>0?(fmtExact(t.cacheRead)+" / "+fmtExact(t.inTok)+" input tokens cached"):void 0
+            },
+              ${R}.createElement("span",{className:"text-muted-foreground"},"Cache hit"),
+              ${R}.createElement("span",{className:"text-foreground"},t.cachePct!==null?(Math.round(t.cachePct)+"%"):"\\u2014")
+            ),
+            ${R}.createElement("div",{className:"flex items-center justify-between"},
+              ${R}.createElement("span",{className:"text-muted-foreground"},"Duration"),
+              ${R}.createElement("span",{className:"text-foreground"},fmtSec(t.durSec,t.streaming))
+            ),
+            ${R}.createElement("div",{
+              className:"flex items-center justify-between",
+              title:t.outTok>0?(fmtExact(t.outTok)+" output tokens"):void 0
+            },
+              ${R}.createElement("span",{className:"text-muted-foreground"},"Output"),
+              ${R}.createElement("span",{className:"text-foreground"},t.outTok>0?((t.tpsApprox?"~":"")+fmtK(t.outTok)):"\\u2014")
+            ),
+            ${R}.createElement("div",{
+              className:"flex items-center justify-between",
+              title:t.thinkTok>0
+                ?(fmtExact(t.thinkTok)+" thinking tokens"+(t.thinkDurSec>0?" ("+fmtSec(t.thinkDurSec,!1)+")":""))
+                :void 0
+            },
+              ${R}.createElement("span",{className:"text-muted-foreground"},"Thinking"),
+              ${R}.createElement("span",{className:"text-foreground"},t.thinkTok>0?((t.tpsApprox?"~":"")+fmtK(t.thinkTok)):"\\u2014")
+            )
+          )
+        )
+      ),
+      document.body
+    ):null;
+    return ${R}.createElement(${R}.Fragment,null,
+      ${R}.createElement("button",{
+        ref:trigRef,
+        type:"button",
+        "data-testid":"agy-context-usage-indicator",
+        "aria-haspopup":"dialog",
+        "aria-expanded":open,
+        "aria-label":"Context window usage: "+trigLabel,
+        onClick:function(){setOpen(function(v){return !v})},
+        className:"flex items-center rounded-md border cursor-pointer shrink-0 select-none "+(open?"bg-card border-border":""),
+        style:{
+          gap:"5px",
+          padding:"2px 6px",
+          height:"24px",
+          color:m.isWarn?warnCol:"var(--muted-foreground)",
+          borderColor:open?void 0:"transparent",
+          backgroundColor:open?void 0:"transparent"
+        }
+      },
+        ${R}.createElement("svg",{
+          width:14,height:14,viewBox:"0 0 16 16",
+          className:"shrink-0",
+          style:{transform:"rotate(-90deg)"}
+        },
+          ${R}.createElement("circle",{
+            cx:8,cy:8,r:6,fill:"none",stroke:"currentColor",strokeWidth:2,
+            style:{opacity:0.22}
+          }),
+          ${R}.createElement("circle",{
+            cx:8,cy:8,r:6,fill:"none",stroke:"currentColor",strokeWidth:2,
+            strokeDasharray:CIRC,
+            strokeDashoffset:CIRC*(1-m.frac),
+            strokeLinecap:"round"
+          })
+        ),
+        ${R}.createElement("span",{className:"text-xs font-medium tabular-nums"},trigLabel)
+      ),
+      popoverEl
+    );
+  }
+  return {Indicator:__AgyContextIndicator,_derive:deriveContextMetrics};
+})()`;
+}
+
+/**
+ * Patch 5 (`buildBindings.contextUsageIndicator` in 2.30+): Mounts an original,
+ * clean-room Context Window & Last-Turn Inference Telemetry indicator into the
+ * `buildBindings` entry slot.
+ *
+ * Modes (`indicatorMode`):
+ *   - `'custom'` (default): mounts `__AgyContextIndicator` both when upstream
+ *     stripped the slot (`void 0`) and when upstream provides a basic native
+ *     component; if a future upstream build both restores a native component
+ *     AND refactors internal hooks so structural anchors no longer match, falls
+ *     back gracefully to keeping the native component instead of breaking `sync`.
+ *   - `'polyfill'`: mounts `__AgyContextIndicator` ONLY when upstream stripped
+ *     the slot (`void 0`); leaves any non-void upstream component untouched.
+ *   - `'stock'`: leaves `buildBindings.contextUsageIndicator` untouched.
+ */
+export const PATCH_CONTEXT_INDICATOR = {
+  id: 'context-usage-indicator',
+  occurrences: 1,
+  anchor: /\}\)\(\{autonomousMode:/,
+  apply(js, { indicatorMode = DEFAULT_INDICATOR_MODE } = {}) {
+    if (!INDICATOR_MODES.has(indicatorMode)) {
+      throw new PatchError(
+        `invalid indicatorMode ${JSON.stringify(indicatorMode)} (expected custom, polyfill, or stock)`,
+        2
+      );
+    }
+    const slotMatch = matchUnique(js, this.anchor, 'PATCH_CONTEXT_INDICATOR:buildBindings');
+    const objOpen = slotMatch.index + 3; // points to `{` in `})({autonomousMode:`
+    const { valueStart, valueEnd } = findTopLevelObjectProperty(
+      js,
+      objOpen,
+      'contextUsageIndicator'
+    );
+    const rawValue = js.slice(valueStart, valueEnd).trim();
+    if (!rawValue) {
+      throw new PatchError('PATCH_CONTEXT_INDICATOR: empty contextUsageIndicator value', 3);
+    }
+    if (rawValue.includes('__AgyContextIndicator')) {
+      throw new PatchError('PATCH_CONTEXT_INDICATOR: contextUsageIndicator is already patched', 3);
+    }
+    const isStripped = rawValue === 'void 0' || rawValue === 'undefined' || rawValue === 'null';
+
+    if (indicatorMode === 'stock') {
+      return { code: js, noop: true, mode: isStripped ? 'stock-empty' : 'stock-native' };
+    }
+    if (indicatorMode === 'polyfill' && !isStripped) {
+      return { code: js, noop: true, mode: 'native-bypassed' };
+    }
+
+    let symbols;
+    try {
+      const [, useConvStateSym] = matchUnique(
+        js,
+        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)=\(a,b\)=>\{var c=\[\],\{optimisticState:d,trueState:f\}=[A-Za-z0-9_$]+\(a\);/,
+        'PATCH_CONTEXT_INDICATOR:useConvState'
+      );
+      const cortexNs = resolveUniqueIdentifier(
+        js,
+        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.TokenType=\{UNSPECIFIED:0,SYSTEM_PROMPT:1,/g,
+        'PATCH_CONTEXT_INDICATOR:TokenType'
+      );
+      const commonNs = resolveUniqueIdentifier(
+        js,
+        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.ExperimentWithVariantSchema\b/g,
+        'PATCH_CONTEXT_INDICATOR:CommonPb'
+      );
+      const reactIdent = resolveUniqueIdentifier(
+        js,
+        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.createElement\([A-Za-z0-9_$]+,\{conversationId:[A-Za-z0-9_$]+\}\)/g,
+        'PATCH_CONTEXT_INDICATOR:React'
+      );
+      const portalNs = resolveUniqueIdentifier(
+        js,
+        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.createPortal\(/g,
+        'PATCH_CONTEXT_INDICATOR:ReactDOM'
+      );
+      symbols = { reactIdent, portalNs, useConvStateSym, cortexNs, commonNs };
+    } catch (exc) {
+      if (!isStripped && indicatorMode === 'custom') {
+        process.stderr.write(
+          `warning: context-usage-indicator internal hook changed upstream (${exc.message}); ` +
+            'preserving upstream native implementation.\n'
+        );
+        return { code: js, noop: true, mode: 'native-fallback' };
+      }
+      throw exc;
+    }
+
+    const injected = buildContextIndicatorSource(symbols);
+    const code = js.slice(0, valueStart) + injected + js.slice(valueEnd);
+    return { code, mode: isStripped ? 'enhanced' : 'enhanced-override' };
+  },
+};
+
 export const DEFAULT_PATCHES = [
   PATCH_MENDEL_BASELINE,
   PATCH_MENDEL_SERVICE,
   PATCH_MENDEL_OVERRIDES,
   PATCH_FLAG_PICKER,
+  PATCH_CONTEXT_INDICATOR,
 ];
 
 export function applyPatches(
   js,
-  { flags = FLAGS, boolFlags = NATIVE_MENDEL_BOOL_FLAGS, stringFlags = NATIVE_MENDEL_STRING_FLAGS, patches = DEFAULT_PATCHES } = {}
+  {
+    flags = FLAGS,
+    boolFlags = NATIVE_MENDEL_BOOL_FLAGS,
+    stringFlags = NATIVE_MENDEL_STRING_FLAGS,
+    indicatorMode = DEFAULT_INDICATOR_MODE,
+    patches = DEFAULT_PATCHES,
+  } = {}
 ) {
   const results = [];
   let out = js;
@@ -1353,12 +2103,17 @@ export function applyPatches(
         3
       );
     }
-    const next = patch.apply(out, { flags, boolFlags, stringFlags });
-    if (next === out) {
+    const applied = patch.apply(out, { flags, boolFlags, stringFlags, indicatorMode });
+    const isObj = typeof applied === 'object' && applied !== null && typeof applied.code === 'string';
+    const next = isObj ? applied.code : applied;
+    const noopAllowed = isObj && applied.noop === true;
+    if (next === out && !noopAllowed) {
       throw new PatchError(`patch "${patch.id}" produced no change`, 3);
     }
     out = next;
-    results.push({ id: patch.id, anchor: String(patch.anchor), occurrences: seen });
+    const rec = { id: patch.id, anchor: String(patch.anchor), occurrences: seen };
+    if (isObj && applied.mode) rec.mode = applied.mode;
+    results.push(rec);
   }
 
   if (out === js) throw new PatchError('no patches applied', 3);
@@ -2077,7 +2832,7 @@ export function ensurePairedBackup(paths, currentAsarBuf, isHooked) {
  * extraction, patch anchors, V8 syntax) *before* they mutate any other target,
  * so a frontend anchor mismatch can no longer leave `app.asar` half-updated.
  */
-function preparePatchedUi(paths) {
+function preparePatchedUi(paths, { indicatorMode = DEFAULT_INDICATOR_MODE } = {}) {
   const binBuf = fs.readFileSync(paths.lsBinary);
   const found = findWebBundleZip(binBuf);
   if (!found) {
@@ -2095,7 +2850,7 @@ function preparePatchedUi(paths) {
     extractZipToDir(found.zip, staging);
     const mainPath = path.join(staging, 'main.js');
     const raw = fs.readFileSync(mainPath, 'utf8');
-    const { output, results } = applyPatches(raw, { flags: FLAGS });
+    const { output, results } = applyPatches(raw, { flags: FLAGS, indicatorMode });
     verifyJsSyntax(output, 'main.js');
     fs.writeFileSync(mainPath, output, 'utf8');
 
@@ -2106,6 +2861,7 @@ function preparePatchedUi(paths) {
       builtinZipOffset: found.offset,
       builtinZipBytes: found.size,
       flags: FLAGS,
+      indicatorMode,
       nativeBaselineCounts: {
         bools: NATIVE_MENDEL_BOOL_FLAGS.length,
         strings: Object.keys(NATIVE_MENDEL_STRING_FLAGS).length,
@@ -2190,8 +2946,8 @@ export function commitPatchedUi(paths, { staging, old, meta }) {
 }
 
 /** Convenience wrapper: prepare + commit in one call. */
-function buildPatchedUiAtomic(paths) {
-  return commitPatchedUi(paths, preparePatchedUi(paths));
+function buildPatchedUiAtomic(paths, patchOpts = {}) {
+  return commitPatchedUi(paths, preparePatchedUi(paths, patchOpts));
 }
 
 function ensureDesktopSwitch(paths) {
@@ -2299,12 +3055,16 @@ function cmdSelfTest(opts) {
   }
   const mainEntry = found.entries.find((e) => e.name === 'main.js');
   const mainRaw = readZipEntry(found.zip, mainEntry).toString('utf8');
-  const { output, results } = applyPatches(mainRaw, { flags: FLAGS });
+  const { output, results } = applyPatches(mainRaw, {
+    flags: FLAGS,
+    indicatorMode: opts.indicatorMode,
+  });
   verifyJsSyntax(output, 'main.js');
 
   say(`webui   : offset=0x${found.offset.toString(16)} entries=${found.entries.length} CRC32=OK`);
   for (const r of results) {
-    say(`  [OK] ${r.id} (occurrences=${r.occurrences})`);
+    const modeTag = r.mode ? `, mode=${r.mode}` : '';
+    say(`  [OK] ${r.id} (occurrences=${r.occurrences}${modeTag})`);
   }
   say(`syntax  : V8 vm.Script parse OK (${mainRaw.length.toLocaleString()} -> ${output.length.toLocaleString()} bytes)`);
   say(C.ok('self-test passed (read-only, 0 files modified)'));
@@ -2329,7 +3089,7 @@ function cmdInstallOrSync(opts, { mode }) {
 
   // Prepare (and fully validate) the new UI *before* mutating app.asar, so a
   // frontend anchor mismatch cannot leave the host archive half-updated.
-  const staged = preparePatchedUi(paths);
+  const staged = preparePatchedUi(paths, { indicatorMode: opts.indicatorMode });
   let meta;
   try {
     const { buf: nextAsar, changed: asarChanged } = patchAsarBuffer(asarBuf, ENV_VAR);
@@ -2382,7 +3142,10 @@ function cmdRepair(opts) {
     // Re-run the real patch pipeline in memory so anchor/V8 failures surface
     // here instead of only in the real run.
     const mainRaw = readZipEntry(found.zip, found.entries.find((e) => e.name === 'main.js')).toString('utf8');
-    const { output, results } = applyPatches(mainRaw, { flags: FLAGS });
+    const { output, results } = applyPatches(mainRaw, {
+      flags: FLAGS,
+      indicatorMode: opts.indicatorMode,
+    });
     verifyJsSyntax(output, 'main.js');
     say(
       `dry-run: would re-extract ${found.entries.length} entries and apply ${results.length} patches ` +
@@ -2390,7 +3153,7 @@ function cmdRepair(opts) {
     );
     return 0;
   }
-  const meta = buildPatchedUiAtomic(paths);
+  const meta = buildPatchedUiAtomic(paths, { indicatorMode: opts.indicatorMode });
   reclaimUserOwnership(paths);
   say(C.bold('\nantigravity-uipatch · repair\n'));
   say(`  ui bundle   ${C.ok('re-extracted and re-patched')} ${C.dim(`(${paths.uiSource})`)}`);
@@ -2521,8 +3284,14 @@ function cmdVerify(opts) {
       problems.push(`UI bundle failed V8 syntax validation: ${exc.message}`);
     }
     uiOk = hasMarkers && syntaxOk;
+    const hasEnhancedIndicator = js.includes('__AgyContextIndicator');
     say(`ui bundle : ${uiDir}`);
     say(`            state : ${uiOk ? C.ok('PATCHED') : C.err(hasMarkers ? 'BROKEN SYNTAX' : 'UNPATCHED')}`);
+    say(
+      `            ctxui : ${
+        hasEnhancedIndicator ? C.ok('enhanced (__AgyContextIndicator)') : C.dim('upstream / stock')
+      }`
+    );
     if (!hasMarkers) problems.push('UI bundle is missing the patch markers');
 
     if (fs.existsSync(metaPath)) {
@@ -2912,6 +3681,7 @@ Options:
   --user <username>     Target desktop account when running as root (or set AGY_TARGET_USER)
   --install-dir <dir>   Antigravity root directory (default: /opt/Antigravity)
   --ui-dir <dir>        Output directory for patched Web UI (default: ~/.local/share/antigravity-uipatch)
+  --indicator-mode <m>  Context indicator policy: custom (default), polyfill, or stock
   --script-path <file>  (pacman-hook) Absolute path to root-owned antigravity_uipatch.mjs
   --write <file>        (pacman-hook) Write hook directly to /etc/pacman.d/hooks/...
   --dry-run             Every command: perform all checks, write nothing at all
@@ -2928,6 +3698,7 @@ function parseArgs(argv) {
     user: undefined,
     installDir: undefined,
     uiDir: undefined,
+    indicatorMode: DEFAULT_INDICATOR_MODE,
     scriptPath: undefined,
     writePath: undefined,
     dryRun: false,
@@ -2935,6 +3706,16 @@ function parseArgs(argv) {
     quiet: false,
     yes: false,
     help: false,
+  };
+
+  const validateIndicatorMode = (raw) => {
+    if (!INDICATOR_MODES.has(raw)) {
+      throw new PatchError(
+        `invalid --indicator-mode ${JSON.stringify(raw)} (expected custom, polyfill, or stock)`,
+        2
+      );
+    }
+    return raw;
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -2955,6 +3736,10 @@ function parseArgs(argv) {
     else if (a.startsWith('--install-dir=')) opts.installDir = a.slice('--install-dir='.length);
     else if (a === '--ui-dir') opts.uiDir = next();
     else if (a.startsWith('--ui-dir=')) opts.uiDir = a.slice('--ui-dir='.length);
+    else if (a === '--indicator-mode') opts.indicatorMode = validateIndicatorMode(next());
+    else if (a.startsWith('--indicator-mode=')) {
+      opts.indicatorMode = validateIndicatorMode(a.slice('--indicator-mode='.length));
+    }
     else if (a === '--script-path') opts.scriptPath = next();
     else if (a.startsWith('--script-path=')) opts.scriptPath = a.slice('--script-path='.length);
     else if (a === '--write') opts.writePath = next();

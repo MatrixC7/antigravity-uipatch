@@ -1,6 +1,6 @@
 # 补丁架构与脚本实现详解（`antigravity_uipatch.mjs`）
 
-> 本文档面向开发者、系统管理员与逆向工程研究人员，详细解析 `antigravity_uipatch.mjs` 的无依赖内部实现：包括尾部追加式 Electron ASAR 读写算法、`language_server` 双内嵌 ZIP 归档识别与纯 `node:zlib` CRC32 解压器、`main.js` 四处前端汇聚点补丁（含双通道共享实验解析器、`window.nativeStorage` 跨随机端口磁盘持久化桥接与严格结构扫描器）、统一桌面启动器解析器 `analyseDesktopExec()`、原子目录切换与备份配对状态机，以及 Pacman Hook 的 Root 权限边界设计。
+> 本文档面向开发者、系统管理员与逆向工程研究人员，详细解析 `antigravity_uipatch.mjs` 的无依赖内部实现：包括尾部追加式 Electron ASAR 读写算法、`language_server` 双内嵌 ZIP 归档识别与纯 `node:zlib` CRC32 解压器、`main.js` 五处前端汇聚点补丁（含双通道共享实验解析器、`window.nativeStorage` 跨随机端口磁盘持久化桥接、严格结构扫描器与洁净室上下文容量及推理遥测指示器）、统一桌面启动器解析器 `analyseDesktopExec()`、原子目录切换与备份配对状态机，以及 Pacman Hook 的 Root 权限边界设计。
 
 ---
 
@@ -10,7 +10,7 @@ Antigravity 桌面端的界面控制逻辑位于 `language_server` 二进制内�
 
 1. **零外部依赖（纯 Node.js 标准库）**：完全基于 `node:fs`、`node:zlib`、`node:crypto`、`node:vm` 等内置模块实现 ASAR 归档打包、ZIP 中央目录解析、DEFLATE 解压、IEEE 802.3 CRC32 校验与 JavaScript 语法树预检，不依赖任何第三方 npm 包，也不依赖外部 `/usr/bin/unzip` 或 `@electron/asar` CLI。
 2. **字节级无损往返（Byte-Identical Round-Trip）**：对 `app.asar` 采用**原数据区零移动、仅尾部追加修改项**的打包算法。当替换映射为空时，`repack()` 直接返回原缓冲区（任意合法输入逐字节 100% 一致）；修改单一条目（`dist/languageServer.js`）时，原厂其余 `1,111` 个文件条目及任何前序第三方归档补丁的偏移量与字节流均分毫不差地原样保留。
-3. **结构化唯一签名匹配、故障闭合（Fail-Closed）与 V8 语法预检**：由于上游每次构建均由 Closure Compiler 重新分配短标识符名（如 `2.29` → `2.31` 中 `fka` → `Ola`、`mtb` → `EGb`、`A` → `B`），全部 4 处前端主锚点与子锚点均采用**基于不变方法名/字符串字面量与语法骨架的结构化正则**动态捕获符号名，并强制断言全文件唯一匹配（`matches.length === 1`）；合成后的完整 `main.js` 必须通过 `new vm.Script(output)` 的 V8 引擎语法解析校验，才会进入 `app.asar` 改写与正式目录原子切换阶段。
+3. **结构化唯一签名匹配、故障闭合（Fail-Closed）与 V8 语法预检**：由于上游每次构建均由 Closure Compiler 重新分配短标识符名（如 `2.29` → `2.31` 中 `fka` → `Ola`、`mtb` → `EGb`、`A` → `B`），全部 5 处前端主锚点与子锚点均采用**基于不变方法名/字符串字面量与语法骨架的结构化正则**（配合负向回顾断言 `(?<![A-Za-z0-9_$])` 完整兼容 `$` 前缀压缩符号）动态捕获符号名，并强制断言全文件唯一匹配（`matches.length === 1`）；合成后的完整 `main.js` 必须通过 `new vm.Script(output)` 的 V8 引擎语法解析校验，才会进入 `app.asar` 改写与正式目录原子切换阶段。
 4. **绝不触碰 `language_server` 二进制**：仅以只读方式扫描内存缓冲区提取内嵌 Web UI，确保与修改 Go 二进制机器码的 [`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock) 正交共存。
 
 ---
@@ -113,9 +113,9 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 ---
 
-## 4. `main.js` 四处结构化前端汇聚点补丁详解
+## 4. `main.js` 五处结构化前端汇聚点补丁详解
 
-在提取出的 `548` 个归档条目（`540` 个文件 + `8` 个目录）中，除 `main.js` 外的其余 `539` 个文件保持原厂字节不变，仅对核心包 `main.js`（`2.31.0-1` 原版 `11,871,831` 字节 → 修补后 `11,882,127` 字节）施加以下 **4 处结构化唯一锚点补丁**（以下括号内符号以 `CL 1017595969` 构建为例，实际运行期均由 `matchUnique()` / `resolveUniqueIdentifier()` 自动从语法结构捕获）：
+在提取出的 `548` 个归档条目（`540` 个文件 + `8` 个目录）中，除 `main.js` 外的其余 `539` 个文件保持原厂字节不变，仅对核心包 `main.js`（`2.31.0-1` 原版 `11,871,831` 字节 → 修补后 `11,908,541` 字节）施加以下 **5 处结构化唯一锚点补丁**（以下括号内符号以 `CL 1017595969` 构建为例，实际运行期均由 `matchUnique()` / `resolveUniqueIdentifier()` 自动从语法结构捕获）：
 
 ### 4.1 补丁 1：`mendel-native-baseline`（`Ola()` 启动预热 + Google 原生基线回退）
 
@@ -175,6 +175,22 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 2. 遇到 `/` 时回看前一个非空白字符，凡不能保守归入除法上下文的 `/` 一律按潜在正则字面量拒绝；
 3. 截取函数体后检查内部是否包含额外的 `function <name>(` 声明，若命中则判定边界异常并中止。
 该设计面向当前已验证的编译组件结构（非通用 JS 词法解析器），若未来上游组件结构发生较大变化，升级时以显式退出码 `3` 提示适配新锚点。
+
+### 4.5 补丁 5：`context-usage-indicator`（`buildBindings` 洁净室上下文容量与实时推理遥测指示器）
+
+在 `antigravity 2.30+` 外部发行包中，Google 在入口自执行调用的 `buildBindings` 字面量（`})({autonomousMode:...`）内将 `contextUsageIndicator` 置为了 `void 0`，使原版组件被 Closure Compiler Tree-Shake 剔除、设置项被压入 `deniedSettings`。然而上游宿主仍完整保留了设置过滤逻辑（`!!bA()?.contextUsageIndicator`）、工具栏挂载点（`B.createElement(sj, { conversationId: d })`）以及后端 `language_server` 流式推送的 `contextWindowUsage` 与 `generatorMetadatasInSlice`（反汇编 `PruneGeneratorMetadata` 证实后端在 `PROD_UI` 模式下仅清空 Prompt 文本切片，完整保留 `ChatModelMetadata` 全部遥测字段）。
+
+`PATCH_CONTEXT_INDICATOR` 采用 **100% 洁净室原创代码**（不拷贝 `2.29` 任何闭源字节）：
+1. **顶层键值扫描与三模式策略（`--indicator-mode`）**：
+   - 通过 `findTopLevelObjectProperty()` 精确定位 `buildBindings` 顶层唯一 `contextUsageIndicator:` 属性的值区间；
+   - 默认 **`custom` 模式**：无论上游为 `void 0` 还是简单原生实现均挂载增强组件 `__AgyContextIndicator`；若未来某版上游**同时**恢复非空原生实现并重构了内部会话 Hook，脚本自动安全降级保留上游原生实现（`native-fallback`），绝不阻断 `pacman -Syu` 同步；若上游仍为 `void 0` 而锚点失配，则严格以退出码 `3` 故障闭合中止；
+   - 另支持 **`polyfill` 模式**（仅在 `void 0` 时注入，上游有原生实现时直接旁路）与 **`stock` 模式**（保持原厂不变）。
+2. **动态符号解析（全文件唯一结构断言）**：
+   - 会话状态订阅 Hook（`$B`）、Protobuf 枚举命名空间（`I.TokenType` / `I.CortexStepStatus` 与 `E.Model`）、React 命名空间（`B`）及 `ReactDOM.createPortal`（`nw`）全部通过 `(?<![A-Za-z0-9_$])` 边界锚点动态捕获；
+   - 使用静态模块级选择器 `{ selector: s => s ? s.agentState : void 0 }` 直接返回不可变引用，杜绝 `useSyncExternalStore` 快照分配循环；浮层经 `createPortal(..., document.body)` 以 `position: fixed` 挂载，脱离 `surface-composer-card` 的 `z-[1]` 层叠上下文且仅依赖 `compiled_tailwind.css` 中实测存在的 24 个核心工具类与内联样式。
+3. **双区实时遥测能力**：
+   - **Context Window 区**：按 `TokenType` 拆分 `Instructions & tools`（支持折叠展开 `System` / `Tools` / `MCP` / `Rules/Skills` / `Agents/Plugins` 非零子项）、`Conversation` 与 `Available`，自动识别 `estimatedAfterCompaction` 或 `lastStepIndex` 之后的已完成非 `intentOnly` `checkpoint` 步骤标记 `~`；
+   - **Last Turn / Generating 遥测区**：读取最新 `CortexStepGeneratorMetadata`（流式生成期间校验 `stepIndices` 防止串读上一轮旧数据，按实时字符流动态估算 `~tok/s`）展示后端真实返回模型 ID（三级回退 + 一键复制）、`Speed`（支持浮层内 `Pin t/s` 跨端口持久化常驻底栏）、`TTFT`、`Cache hit`、`Duration`、`Output`、`Thinking` 以及 `retries > 0` 时的静默重试告警角标。
 
 ---
 
