@@ -3302,9 +3302,20 @@ function cmdVerify(opts) {
   }
   const switchOn = launcherState === 'ON';
 
+  const uiDir = paths.ui;
   if (launcherState === 'ON') {
     say(`launcher  : ${C.ok('ON')} (${paths.desktop})`);
-    say(`            bundle: ${launcherUiDir}`);
+    say(`            bundle : ${launcherUiDir}`);
+    const switchResolved =
+      fs.existsSync(launcherUiDir) && fs.existsSync(path.join(launcherUiDir, 'main.js'));
+    if (!switchResolved) {
+      problems.push(`launcher points at a missing bundle: ${launcherUiDir}`);
+      say(`            resolve: ${C.err('MISSING')} (${launcherUiDir})`);
+    } else if (path.resolve(launcherUiDir) !== path.resolve(uiDir)) {
+      say(`            resolve: ${C.warn(`differs from target ui bundle (${uiDir})`)}`);
+    } else {
+      say(`            resolve: ${C.ok('bundle present')}`);
+    }
   } else if (launcherState === 'CUSTOM') {
     say(`launcher  : ${C.dim(`custom Exec= (${launcherDetail})`)} (${paths.desktop})`);
   } else if (launcherState === 'UNSET') {
@@ -3313,7 +3324,6 @@ function cmdVerify(opts) {
     say(`launcher  : ${C.dim(`manual (pass ${ENV_VAR} via .desktop or terminal)`)}`);
   }
 
-  const uiDir = paths.ui;
   const mainPath = path.join(uiDir, 'main.js');
   const metaPath = path.join(uiDir, 'uipatch.json');
   let uiOk = false;
@@ -3394,19 +3404,6 @@ function cmdVerify(opts) {
   } else {
     say(`ui bundle : ${uiDir} ${C.err('(ABSENT)')}`);
     problems.push(`patched UI bundle absent at ${uiDir} (run 'install' or 'repair')`);
-  }
-
-  if (switchOn && launcherUiDir) {
-    const switchResolved =
-      fs.existsSync(launcherUiDir) && fs.existsSync(path.join(launcherUiDir, 'main.js'));
-    if (!switchResolved) {
-      problems.push(`launcher points at a missing bundle: ${launcherUiDir}`);
-      say(`            resolve: ${C.err('MISSING')} (${launcherUiDir})`);
-    } else if (path.resolve(launcherUiDir) !== path.resolve(uiDir)) {
-      say(`            resolve: ${C.warn(`points to ${launcherUiDir} (differs from ${uiDir})`)}`);
-    } else {
-      say(`            resolve: ${C.ok('bundle present')}`);
-    }
   }
 
   try {
