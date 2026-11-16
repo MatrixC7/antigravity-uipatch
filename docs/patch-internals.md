@@ -72,7 +72,7 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 ### 2.4 桌面启动器 `Exec=` 的只读双层解码与语义解析（`analyseDesktopExec`）
 
-脚本绝不自动创建或改写 `~/.local/share/applications/antigravity.desktop`；但在 `makePaths()`（供 `repair` 自动跟随自定义路径）与 `cmdVerify()` 中，会以只读方式解析用户可能配置的 `.desktop` `Exec=` 行。由于 `.desktop` 的 `Exec=` 行并非 shell 脚本且同时受两层语法约束，`analyseDesktopExec()` 按相反顺序逐层还原：
+脚本绝不自动创建或改写 `~/.local/share/applications/antigravity.desktop`，也不会用其中的历史路径覆盖 `makePaths()` 的默认输出目录（`~/.local/share/antigravity-externalui`）；仅在 `cmdVerify()` 中以只读方式解析用户可能配置的 `.desktop` `Exec=` 行以核验其目标目录状态。由于 `.desktop` 的 `Exec=` 行并非 shell 脚本且同时受两层语法约束，`analyseDesktopExec()` 按相反顺序逐层还原：
 1. **外层（GLib `GKeyFile` 字符串层反转义）**：由 `keyFileUnescapeValue()` 先将双写反斜杠（`\\`）、换行/制表符及行首 `\s` 还原；
 2. **内层（Desktop Entry `Exec` argv 层分词与去引号）**：由 `tokenizeDesktopExec()`（支持 `OTHER="hello world"` 这类参数内引号区间）与 `unquoteDesktopExecToken()` 还原 `"`、`` ` ``、`$`、`\` 转义，并将字面 `%%` 还原为 `%`；
 3. **`env` 选项与程序参数边界建模**：识别 `env` 与 `*/env` 前缀下的无参选项（`-i`/`--ignore-environment`、`-0`/`--null`、`-v`/`--debug`）、带参选项（`-u`/`--unset`、`-C`/`--chdir`）及选项终止符 `--`；仅提取程序名之前的 `AGY_UI_BUNDLE=<ui-dir>` 赋值（同名多次赋值按 `env(1)` 后胜出语义取值），程序名之后的同形参数按普通参数忽略；遇到 `env -S` 或未知选项时标注 `unsupported`，由 `verify` 作信息提示而不误猜。
@@ -200,8 +200,8 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 - **`atomicWriteFile()`**：拒绝覆盖符号链接或非常规文件；经 `resolveWriteRoot()` 一次规范化目标父目录并由 `assertNoSymlinkBelowRoot()` 校验无根下链接后，在同目录创建 `.tmp-<name>-<pid>-<rand>` 独占临时文件（`wx`），写入后执行 `fsync`、继承原文件权限位与属主，再通过 `fs.renameSync` 原子替换并对目录执行 `fsync`。
 - **`preparePatchedUi()` + `commitPatchedUi()` 四阶段提交状态机**：
-  1. `preparePatchedUi()` 先在 `fs.mkdtempSync()` 独占创建的 `.uipatch-staging-*` 目录中完成全部 `548` 个条目的解压、CRC32 校验、5 处前端补丁替换与 V8 `vm.Script` 语法验证，并写入 `uipatch.json` 元数据（`schemaVersion: 2`，记录引擎 `CL`、`nativeBaselineCounts`、`mainJsBytes` 与 `mainJsSha256`）。`install` / `sync` 在改写 `app.asar` **之前**先完成此步骤（且在写回 `app.asar` 前复核磁盘 `ino` 与 `mtimeMs` 未并发变化），确保前端锚点失配绝不会留下“ASAR 已改、UI 未变”的半完成状态。
-  2. `commitPatchedUi()` 按 `prepared` → `old-moved` → `committed` / `rolled-back` / `rollback-failed` 推进：仅当**本进程自身成功**将 staging 提升为正式目录（`committed`）或将 `.uipatch-old-*` 移回原位（`rolled-back`；若回滚前目标路径已被外部重新创建，仅允许移回空目录，非空目录拒绝覆盖）时，`finally` 才会清理 `.uipatch-old-*`。一旦提升与回滚同时失败（`rollback-failed`），旧目录被完整保留并在抛出的 `PatchError` 中打印绝对恢复路径与 `mv` 命令。
+  1. `preparePatchedUi()` 先在 `fs.mkdtempSync()` 独占创建的 `.externalui-staging-*` 目录中完成全部 `548` 个条目的解压、CRC32 校验、5 处前端补丁替换与 V8 `vm.Script` 语法验证，并写入 `uipatch.json` 元数据（`schemaVersion: 2`，记录引擎 `CL`、`nativeBaselineCounts`、`mainJsBytes` 与 `mainJsSha256`）。`install` / `sync` 在改写 `app.asar` **之前**先完成此步骤（且在写回 `app.asar` 前复核磁盘 `ino` 与 `mtimeMs` 未并发变化），确保前端锚点失配绝不会留下“ASAR 已改、UI 未变”的半完成状态。
+  2. `commitPatchedUi()` 按 `prepared` → `old-moved` → `committed` / `rolled-back` / `rollback-failed` 推进：仅当**本进程自身成功**将 staging 提升为正式目录（`committed`）或将 `.externalui-old-*` 移回原位（`rolled-back`；若回滚前目标路径已被外部重新创建，仅允许移回空目录，非空目录拒绝覆盖）时，`finally` 才会清理 `.externalui-old-*`。一旦提升与回滚同时失败（`rollback-failed`），旧目录被完整保留并在抛出的 `PatchError` 中打印绝对恢复路径与 `mv` 命令。
 
 ### 5.2 内容级备份配对校验与坏备份隔离重建
 

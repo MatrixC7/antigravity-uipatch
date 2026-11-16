@@ -16,7 +16,7 @@
 | `self-test` | 否（纯只读） | 内存校验 ASAR 空替换逐字节往返、内嵌 Web UI `main.js` CRC32、5 处锚点唯一性与 V8 语法解析 |
 | `install`（`patch`） | 是 | 记录/校验配对备份，暂存提取并修补外置 UI，注入 `app.asar` 惰性环境变量钩子（不自动修改 `.desktop` 文件） |
 | `sync` | 是 | 面向软件包升级后的全量同步：当新版 `app.asar` 未挂钩时自动刷新配对备份、重注钩子并重提新版 UI |
-| `repair` | 否 | 仅从当前 `language_server` 重新提取并原子替换外置 Web UI（若 `.desktop` 已配置路径则自动沿用） |
+| `repair` | 否 | 仅从当前 `language_server` 重新提取并原子替换外置 Web UI（不触碰 `app.asar`） |
 | `verify`（`status`） | 否（纯只读） | 结构化检查构建 `CL`、备份配对、`uipatch.json` 与 `main.js` 哈希、可选 `.desktop` 配置及运行中进程 |
 | `restore`（`uninstall`） | 是 | 经 `pairsWith` 内容级配对校验后原子写回原版 `app.asar` |
 | `extract [dir]` | 否 | 将未打补丁的原厂内嵌 Web UI 解压至指定的新建或空目录（拒绝非空目录，绝不清空用户数据） |
@@ -26,7 +26,7 @@
 
 - **`--user <username>`**：以 `root`（`sudo`）运行时指定目标桌面账号（用于定位该用户的 `~/.local/share/applications/antigravity.desktop` 与默认外置 UI 目录；亦可通过环境变量 `AGY_TARGET_USER` 传入）。
 - **`--install-dir <dir>`**：指定 Antigravity 安装根目录（默认 `/opt/Antigravity`）。
-- **`--ui-dir <dir>`**：自定义外置 Web UI 目录。未显式指定时按以下优先级自动解析：`--ui-dir` > `AGY_UI_DIR` > `.desktop` 当前已配置路径 > `~/.local/share/antigravity-externalui`。
+- **`--ui-dir <dir>`**：自定义外置 Web UI 目录。未显式指定时按以下优先级解析：`--ui-dir` > `AGY_UI_DIR` > `~/.local/share/antigravity-externalui`。
 - **`--indicator-mode <custom|polyfill|stock>`**：上下文与推理遥测指示器挂载策略：
   - `custom`（默认）：挂载增强指示器组件 `__AgyContextIndicator`；若未来某版上游同时恢复非空原生组件并重构了内部会话 Hook，脚本自动安全回退并保留上游原生实现，绝不阻断升级同步；
   - `polyfill`：仅当上游插槽为 `void 0` 时挂载增强组件，上游提供原生实现时直接旁路；
@@ -179,7 +179,7 @@ node --test tests/
 
 ### 4.4 桌面启动器 `Exec=` 只读解析范围
 
-- 本工具所有子命令均**只读检查、绝不改写** `~/.local/share/applications/antigravity.desktop`，仅在 `makePaths()`（供 `repair` 自动跟随自定义路径）与 `verify` 中使用 `analyseDesktopExec()` 读取用户可能配置的 `AGY_UI_BUNDLE=<dir>`。
+- 本工具所有子命令均**只读检查、绝不改写** `~/.local/share/applications/antigravity.desktop`，且不会用 `.desktop` 中的旧路径反过来覆盖 `install` / `sync` / `repair` 的默认输出目录（`~/.local/share/antigravity-externalui`）；仅在 `verify` 中使用 `analyseDesktopExec()` 读取用户可能配置的 `AGY_UI_BUNDLE=<dir>` 以提示其指向状态。
 - 解析时按 **GKeyFile 字符串层反转义**（`keyFileUnescapeValue()`）→ **Desktop Entry `Exec` 参数分词与去引号**（`tokenizeDesktopExec()` / `unquoteDesktopExecToken()`，含 `%%` → `%`）两层顺序解码。
 - 支持识别 `env` / `/usr/bin/env` 前缀下的标准选项（`-i`/`--ignore-environment`、`-0`/`--null`、`-v`/`--debug`、`-u`/`--unset`、`-C`/`--chdir`、`--`）与程序名前的 `NAME=value` 赋值（程序名之后的同形参数按普通程序参数忽略）；若用户使用了 `env -S` 或自定义 shell 包装器，`verify` 仅作信息提示而不报错阻断。
 

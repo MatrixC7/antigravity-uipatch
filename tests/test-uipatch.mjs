@@ -735,8 +735,8 @@ test('ZIP reader rejects a decoy EOCD inside a comment and validates the CD end 
 test('commitPatchedUi never destroys the only surviving bundle when both renames fail', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uipatch-commit-'));
   const uiDir = path.join(tmp, 'ui');
-  const staging = path.join(tmp, '.uipatch-staging-x');
-  const old = path.join(tmp, '.uipatch-old-x');
+  const staging = path.join(tmp, '.externalui-staging-x');
+  const old = path.join(tmp, '.externalui-old-x');
 
   fs.mkdirSync(uiDir, { recursive: true });
   fs.writeFileSync(path.join(uiDir, 'PRIOR.txt'), 'old working bundle');
@@ -783,8 +783,8 @@ test('commitPatchedUi deletes the aside copy only after a successful commit', ()
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'uipatch-commit-ok-'));
   try {
     const uiDir = path.join(tmp, 'ui');
-    const staging = path.join(tmp, '.uipatch-staging-ok');
-    const old = path.join(tmp, '.uipatch-old-ok');
+    const staging = path.join(tmp, '.externalui-staging-ok');
+    const old = path.join(tmp, '.externalui-old-ok');
 
     fs.mkdirSync(uiDir, { recursive: true });
     fs.writeFileSync(path.join(uiDir, 'OLD.txt'), 'old');

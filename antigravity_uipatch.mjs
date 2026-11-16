@@ -91,8 +91,8 @@
  *    root-owned Pacman hook audit (`auditRootOwnedChain()`) rejects symlinks
  *    anywhere in the lexical path and verifies ownership up the `realpath` chain.
  * 5. Optional `.desktop` `Exec=` inspection (`analyseDesktopExec()`) is strictly
- *    read-only and decodes two-layer `GKeyFile` -> `Exec` argv escaping to
- *    auto-detect user-configured `AGY_UI_BUNDLE` paths in `repair` and `verify`.
+ *    read-only and decodes two-layer `GKeyFile` -> `Exec` argv escaping so
+ *    `verify` can report user-configured `AGY_UI_BUNDLE` launcher status.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -2464,8 +2464,8 @@ export function unquoteDesktopExecToken(raw) {
 }
 
 /**
- * Read-only parser for a Desktop Entry `Exec=` line, shared by `makePaths()`
- * and `verify` to detect a user-configured `AGY_UI_BUNDLE=<dir>` assignment.
+ * Read-only parser for a Desktop Entry `Exec=` line, used by `verify` to
+ * inspect a user-configured `AGY_UI_BUNDLE=<dir>` assignment.
  *
  * Modelled `env` semantics:
  * - a leading `env` or `/usr/bin/env` token introduces an environment prefix;
@@ -2720,22 +2720,10 @@ function makePaths(opts = {}) {
   const desktop = path.join(acct.home, '.local/share/applications/antigravity.desktop');
   const defaultUi = path.join(acct.home, '.local/share/antigravity-externalui');
 
-  // Explicit option wins, then the environment, then whatever the launcher is
-  // actually pointing at (so `repair` maintains the bundle the desktop really
-  // loads instead of silently rebuilding a different directory), then default.
-  let ui = opts.uiDir || process.env.AGY_UI_DIR || null;
-  let uiSource = ui ? (opts.uiDir ? 'option' : 'environment') : null;
-  if (!ui) {
-    try {
-      if (fs.existsSync(desktop)) {
-        const parsed = parseLauncherAssignment(fs.readFileSync(desktop, 'utf8'), ENV_VAR);
-        if (parsed.assignment && parsed.value) {
-          ui = parsed.value;
-          uiSource = 'launcher';
-        }
-      }
-    } catch {}
-  }
+  // Explicit --ui-dir option wins, then AGY_UI_DIR, then ~/.local/share/antigravity-externalui.
+  // Never let a stale .desktop assignment hijack install/sync/repair output paths.
+  const ui = opts.uiDir || process.env.AGY_UI_DIR || defaultUi;
+  const uiSource = opts.uiDir ? 'option' : process.env.AGY_UI_DIR ? 'environment' : 'default';
 
   return {
     account: acct,
@@ -2744,8 +2732,8 @@ function makePaths(opts = {}) {
     unpacked: path.join(installDir, 'resources', 'app.asar.unpacked'),
     lsBinary: path.join(installDir, 'resources', 'bin', 'language_server'),
     desktop,
-    ui: ui || defaultUi,
-    uiSource: uiSource || 'default',
+    ui,
+    uiSource,
     backup: path.join(acct.home, '.local/share/antigravity-asar-backup'),
   };
 }
@@ -2929,8 +2917,8 @@ function preparePatchedUi(paths, { indicatorMode = DEFAULT_INDICATOR_MODE } = {}
   fs.mkdirSync(parent, { recursive: true });
   const stamp = `${process.pid}-${Date.now()}`;
   // mkdtemp guarantees an exclusively created, empty directory.
-  const staging = fs.mkdtempSync(path.join(parent, '.uipatch-staging-'));
-  const old = path.join(parent, `.uipatch-old-${stamp}`);
+  const staging = fs.mkdtempSync(path.join(parent, '.externalui-staging-'));
+  const old = path.join(parent, `.externalui-old-${stamp}`);
 
   try {
     extractZipToDir(found.zip, staging);
@@ -3414,6 +3402,8 @@ function cmdVerify(opts) {
     if (!switchResolved) {
       problems.push(`launcher points at a missing bundle: ${launcherUiDir}`);
       say(`            resolve: ${C.err('MISSING')} (${launcherUiDir})`);
+    } else if (path.resolve(launcherUiDir) !== path.resolve(uiDir)) {
+      say(`            resolve: ${C.warn(`points to ${launcherUiDir} (differs from ${uiDir})`)}`);
     } else {
       say(`            resolve: ${C.ok('bundle present')}`);
     }
