@@ -18,7 +18,7 @@
  * Examples
  * --------
  *   node verify_live.mjs
- *   node verify_live.mjs --ui-dir ~/.local/share/antigravity-uipatch
+ *   node verify_live.mjs --ui-dir ~/.local/share/antigravity-externalui
  *
  * Exit codes:
  *   0 = all live HTTP/RPC and bundle assertions passed
@@ -46,7 +46,7 @@ class UsageError extends Error {}
 function parseCli(argv) {
   const opts = {
     binary: `${DEFAULT_INSTALL_DIR}/resources/bin/language_server`,
-    uiDir: path.join(os.homedir(), '.local/share/antigravity-uipatch'),
+    uiDir: path.join(os.homedir(), '.local/share/antigravity-externalui'),
     timeoutMs: 20000,
     help: false,
   };

@@ -213,10 +213,10 @@ Avg TTFT           1.74s   Avg Duration             4.08s
 ## 4. 常见注意事项与边界说明
 
 1. **启动时需传入 `AGY_UI_BUNDLE` 环境变量**：
-   - `install` 不会自动改写你的 `.desktop` 文件。由于 `app.asar` 钩子处于惰性状态，需在 `.desktop` 的 `Exec=` 行或终端启动命令中指定 `AGY_UI_BUNDLE`（默认提取路径为 `~/.local/share/antigravity-uipatch`；注意 `.desktop` 中不展开 `$HOME`，请填写绝对路径）。反之，不带该环境变量启动即为原厂内置 UI。
+   - `install` 不会自动改写你的 `.desktop` 文件。由于 `app.asar` 钩子处于惰性状态，需在 `.desktop` 的 `Exec=` 行或终端启动命令中指定 `AGY_UI_BUNDLE`（默认提取路径为 `~/.local/share/antigravity-externalui`；注意 `.desktop` 中不展开 `$HOME`，请填写绝对路径）。反之，不带该环境变量启动即为原厂内置 UI。
 2. **KDE Plasma 桌面缓存（`ksycoca6`）机制**：
    - KDE 启动器通过二进制服务缓存索引 `.desktop` 文件。手动编辑 `~/.local/share/applications/antigravity.desktop` 后若未立即生效，可在终端运行一次 `kbuildsycoca6 --noincremental` 刷新缓存。
-3. **切勿在仍传入 `AGY_UI_BUNDLE` 的情况下直接删除 `~/.local/share/antigravity-uipatch` 目录**：
+3. **切勿在仍传入 `AGY_UI_BUNDLE` 的情况下直接删除 `~/.local/share/antigravity-externalui` 目录**：
    - `language_server` 的 `--web_bundle_path` 参数在目标目录不存在时不会回退至内嵌 ZIP，而是直接返回 `HTTP 500`（表现为空白窗口）。如需清理外置 UI 目录，请先去掉启动环境变量或执行 `restore`。
 4. **软件包升级后请同步更新外置 UI（推荐配置 Pacman Hook）**：
    - 当系统更新 `antigravity` 软件包时，`app.asar` 与 `language_server` 会同时更新。运行 `sync`（或配置本仓库提供的 `pacman/99-antigravity-uipatch.hook`）会自动从**新版** `language_server` 重新提取并修补前端代码，避免出现“旧版外置前端搭配新版后端 API”的版本错位，同时完整保留你在 `app_storage.json` 中的自定义开关配置。

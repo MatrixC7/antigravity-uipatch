@@ -33,7 +33,7 @@
  *    is set in the environment. Without that variable, behavior is 100% stock.
  *    Repacking uses an append-only strategy that preserves every untouched entry
  *    (including any prior third-party `app.asar` patches) byte-for-byte.
- * 2. Extracted Web UI (`~/.local/share/antigravity-uipatch/`) with 5 structural
+ * 2. Extracted Web UI (`~/.local/share/antigravity-externalui/`) with 5 structural
  *    choke-point patches in `main.js` (resolving Closure-minified identifiers by
  *    unique AST/property signatures and validating output via V8 `vm.Script`):
  *    - `mendel-native-baseline`: pre-hydrates `jetski.developer.customFlagOverrides`
@@ -2718,7 +2718,7 @@ function makePaths(opts = {}) {
   const acct = resolveUserAccount(opts.user || process.env.AGY_TARGET_USER);
   const installDir = opts.installDir || process.env.AGY_INSTALL_DIR || DEFAULT_INSTALL_DIR;
   const desktop = path.join(acct.home, '.local/share/applications/antigravity.desktop');
-  const defaultUi = path.join(acct.home, '.local/share/antigravity-uipatch');
+  const defaultUi = path.join(acct.home, '.local/share/antigravity-externalui');
 
   // Explicit option wins, then the environment, then whatever the launcher is
   // actually pointing at (so `repair` maintains the bundle the desktop really
@@ -2746,7 +2746,7 @@ function makePaths(opts = {}) {
     desktop,
     ui: ui || defaultUi,
     uiSource: uiSource || 'default',
-    backup: path.join(acct.home, '.local/share/antigravity-uipatch-backup'),
+    backup: path.join(acct.home, '.local/share/antigravity-asar-backup'),
   };
 }
 
@@ -3325,7 +3325,7 @@ function cmdVerify(opts) {
     say(`launcher  : ${C.dim(`manual (pass ${ENV_VAR} via .desktop or terminal)`)}`);
   }
 
-  const uiDir = launcherUiDir || paths.ui;
+  const uiDir = paths.ui;
   const mainPath = path.join(uiDir, 'main.js');
   const metaPath = path.join(uiDir, 'uipatch.json');
   let uiOk = false;
@@ -3700,7 +3700,7 @@ Commands:
 Options:
   --user <username>     Target desktop account when running as root (or set AGY_TARGET_USER)
   --install-dir <dir>   Antigravity root directory (default: /opt/Antigravity)
-  --ui-dir <dir>        Output directory for patched Web UI (default: ~/.local/share/antigravity-uipatch)
+  --ui-dir <dir>        Output directory for patched Web UI (default: ~/.local/share/antigravity-externalui)
   --indicator-mode <m>  Context indicator policy: custom (default), polyfill, or stock
   --script-path <file>  (pacman-hook) Absolute path to root-owned antigravity_uipatch.mjs
   --write <file>        (pacman-hook) Write hook directly to /etc/pacman.d/hooks/...

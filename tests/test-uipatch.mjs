@@ -188,7 +188,7 @@ test('synthetic ASAR round-trips byte-for-byte when unedited', () => {
 
 test('real host app.asar round-trips byte-for-byte when present', () => {
   const candidate = [
-    path.join(os.homedir(), '.local/share/antigravity-uipatch-backup/app.asar.orig'),
+    path.join(os.homedir(), '.local/share/antigravity-asar-backup/app.asar.orig'),
     '/opt/Antigravity/resources/app.asar',
   ].find((p) => fs.existsSync(p));
   if (!candidate) return;

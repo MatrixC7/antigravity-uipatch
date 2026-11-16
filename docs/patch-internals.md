@@ -205,7 +205,7 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 ### 5.2 内容级备份配对校验与坏备份隔离重建
 
-备份文件位于 `~/.local/share/antigravity-uipatch-backup/app.asar.orig`。`pairsWith(backupBuf, currentBuf)` 在内存中检验：
+备份文件位于 `~/.local/share/antigravity-asar-backup/app.asar.orig`。`pairsWith(backupBuf, currentBuf)` 在内存中检验：
 1. `backupBuf` 自身必须可解析为合法 ASAR，且 `dist/languageServer.js` 不含 `AGY_UI_BUNDLE` 钩子；
 2. `backupBuf` 与 `currentBuf` 摘要相等，或对 `backupBuf` 重新执行一次 `patchAsarBuffer(backupBuf)` 后得到的 SHA256 与当前 `/opt/Antigravity/resources/app.asar` 完全相等。
 

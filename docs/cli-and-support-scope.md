@@ -26,7 +26,7 @@
 
 - **`--user <username>`**：以 `root`（`sudo`）运行时指定目标桌面账号（用于定位该用户的 `~/.local/share/applications/antigravity.desktop` 与默认外置 UI 目录；亦可通过环境变量 `AGY_TARGET_USER` 传入）。
 - **`--install-dir <dir>`**：指定 Antigravity 安装根目录（默认 `/opt/Antigravity`）。
-- **`--ui-dir <dir>`**：自定义外置 Web UI 目录。未显式指定时按以下优先级自动解析：`--ui-dir` > `AGY_UI_DIR` > `.desktop` 当前已配置路径 > `~/.local/share/antigravity-uipatch`。
+- **`--ui-dir <dir>`**：自定义外置 Web UI 目录。未显式指定时按以下优先级自动解析：`--ui-dir` > `AGY_UI_DIR` > `.desktop` 当前已配置路径 > `~/.local/share/antigravity-externalui`。
 - **`--indicator-mode <custom|polyfill|stock>`**：上下文与推理遥测指示器挂载策略：
   - `custom`（默认）：挂载增强指示器组件 `__AgyContextIndicator`；若未来某版上游同时恢复非空原生组件并重构了内部会话 Hook，脚本自动安全回退并保留上游原生实现，绝不阻断升级同步；
   - `polyfill`：仅当上游插槽为 `void 0` 时挂载增强组件，上游提供原生实现时直接旁路；
@@ -41,14 +41,14 @@
 
 1. **终端命令行启动**：
    ```bash
-   AGY_UI_BUNDLE="$HOME/.local/share/antigravity-uipatch" antigravity
+   AGY_UI_BUNDLE="$HOME/.local/share/antigravity-externalui" antigravity
    ```
    （不传该变量直接运行 `antigravity` 即可免卸载以原厂内置 UI 启动。）
 
 2. **桌面图标（`.desktop` 文件）启动**：
    直接编辑 `~/.local/share/applications/antigravity.desktop`（若该文件不存在，先启动一次 Antigravity 通常会自动生成，也可在桌面菜单右键「编辑应用程序」创建用户级副本；若仍不存在，再执行 `install -Dm644 /usr/share/applications/antigravity.desktop ~/.local/share/applications/antigravity.desktop` 以当前用户可写权限拷贝一份），将其中的 `Exec=` 行改为（注意 `.desktop` 标准不展开 `$HOME` 或 `~`，须填写绝对路径）：
    ```ini
-   Exec=env AGY_UI_BUNDLE=/home/<你的用户名>/.local/share/antigravity-uipatch /usr/bin/antigravity %U
+   Exec=env AGY_UI_BUNDLE=/home/<你的用户名>/.local/share/antigravity-externalui /usr/bin/antigravity %U
    ```
    （KDE Plasma 桌面若未立即生效，可执行一次 `kbuildsycoca6 --noincremental` 刷新启动器缓存。）
 
@@ -88,7 +88,7 @@ sudo rm -rf /usr/local/share/antigravity-uipatch
 
 # （可选）确认不再需要后清理用户目录下的外置 UI 与备份
 # 注：你在 Developer 面板及指示器中的个人偏好独立保存在 ~/.config/Antigravity/app_storage.json，不会被误删
-rm -rf ~/.local/share/antigravity-uipatch ~/.local/share/antigravity-uipatch-backup
+rm -rf ~/.local/share/antigravity-externalui ~/.local/share/antigravity-asar-backup
 ```
 
 ---
@@ -146,7 +146,7 @@ node --test tests/
 ### 3.2 已知运行边界
 
 1. **前端入口解锁不替代云端专有服务或其余已被编译期剥离的专有组件**：部分 Google 内部专用开关（CitC、ABFS、Critique 等）因缺少云端后端权限无法工作；`2.31.0-1` 外部包中被置为 `buildBindings: void 0` 的三项组件里，**`contextUsageIndicator` 已由本工具挂载增强组件完整恢复**，其余两项（`enable-code-search-palette` 与 `enable-enhanced-file-viewer`）因无实现代码仍不会生效。
-2. **请勿在启用状态下直接删除外置 UI 目录**：当启动环境仍带有 `AGY_UI_BUNDLE` 时，若手动删空 `~/.local/share/antigravity-uipatch`，`language_server` 会因目录缺失返回 `HTTP 500`。清理目录前请先移除环境变量或运行 `restore`。
+2. **请勿在启用状态下直接删除外置 UI 目录**：当启动环境仍带有 `AGY_UI_BUNDLE` 时，若手动删空 `~/.local/share/antigravity-externalui`，`language_server` 会因目录缺失返回 `HTTP 500`。清理目录前请先移除环境变量或运行 `restore`。
 3. **多 Hook 的执行顺序与还原边界**：本工具采用尾部追加式重打包，因此与其他修改 `app.asar` 的 Hook 在其之后运行时可无损共存。但若在本工具之后又有第三方工具改写了别的条目，`restore` 的字节级配对会判定失配并拒绝还原（保护行为）——此时请重装 `antigravity` 后再 `install`。
 4. **`verify` 的校验范围与实时进程提示**：`verify` 强制校验 `app.asar` 钩子、配对备份与外置 UI 包完整性（若 `.desktop` 中显式配置了 `AGY_UI_BUNDLE`，同时校验该路径可达；未配置 `.desktop` 不视为错误）；若后台已有旧 `language_server` 进程在运行，`live proc` 行会显示当前进程是否已挂载 `--web_bundle_path`。
 

@@ -63,11 +63,11 @@ node antigravity_uipatch.mjs verify
 > **`install` 不会自动修改你的桌面启动器文件**。安装完成后，启动 Antigravity 时需手动传入环境变量 `AGY_UI_BUNDLE` 才会加载外置修补 UI（不传该变量则直接运行原厂内置 UI）：
 > - **终端启动**：
 >   ```bash
->   AGY_UI_BUNDLE="$HOME/.local/share/antigravity-uipatch" antigravity
+>   AGY_UI_BUNDLE="$HOME/.local/share/antigravity-externalui" antigravity
 >   ```
 > - **桌面图标（`.desktop` 文件）启动**：直接编辑 `~/.local/share/applications/antigravity.desktop` 中的 `Exec=` 行（若该文件不存在，可先启动一次 Antigravity 使其自动创建，或在系统应用菜单右键「编辑应用程序」生成；若仍未生成，再从 `/usr/share/applications/antigravity.desktop` 复制过来并注意赋予当前用户读写权限）。注意 `.desktop` 中不展开 `$HOME`，请填写实际绝对路径：
 >   ```ini
->   Exec=env AGY_UI_BUNDLE=/home/<你的用户名>/.local/share/antigravity-uipatch /usr/bin/antigravity %U
+>   Exec=env AGY_UI_BUNDLE=/home/<你的用户名>/.local/share/antigravity-externalui /usr/bin/antigravity %U
 >   ```
 
 ---
