@@ -43,6 +43,7 @@ import {
   ensurePairedBackup,
   extractZipToDir,
   findWebBundleZip,
+  flexRe,
   keyFileUnescapeValue,
   parseLauncherAssignment,
   listZipEntries,
@@ -1007,6 +1008,44 @@ test('structural anchors survive Closure Compiler identifier re-minification', (
   assert.ok(output.includes('$GenSl={startIndex:0}'));
   assert.ok(output.includes('$PortalNs.createPortal('));
   assert.doesNotThrow(() => verifyJsSyntax(output));
+});
+
+test('structural anchors survive Closure Compiler line-wrap newlines across all 5 patches', () => {
+  // Reproduces Antigravity 2.35's ~500-col Closure Compiler wrap (`experimentConfig?\n{experiments:`)
+  // and injects newlines at token boundaries inside every patch & sub-anchor site.
+  const wrapped = SYNTH_BUNDLE
+    .replace('experimentConfig?.experiments??[]', 'experimentConfig?.\nexperiments??\n[]')
+    .replace('x.experimentConfig?{experiments:', 'x.experimentConfig?\n{experiments:')
+    .replace('a.experiments[b])?!a.disabled:!1', 'a.experiments[b])?\n!a.disabled:\n!1')
+    .replace('d=>(d=d[b])?!d.disabled:!1),a.experimentEnabledProviders', 'd=>(d=d[b])?\n!d.disabled:!1),\na.experimentEnabledProviders')
+    .replace('setMendelFlagOverrides(Wb(yia,{overrides:b}))', 'setMendelFlagOverrides(\nWb(yia,\n{overrides:\nb}))')
+    .replace('Rla(this);this.stateProvider.dispose();', 'Rla(this);\nthis.stateProvider.dispose();')
+    .replace('!a.disabled:!1,JT=(a,b)=>{var c=NMb(a)', '!a.disabled:!1,\nJT=(a,b)=>{\nvar c=NMb(a)')
+    .replace('async function hhd(a){var b=e,c=e;try{if(typeof window!=="undefined"&&window.nativeStorage)', 'async function hhd(a){\nvar b=e,c=e;\ntry{if(typeof window!=="undefined"&&\nwindow.nativeStorage)')
+    .replace('function EGb({suggestedFlags:a,onAdd:b}){', 'function EGb({suggestedFlags:a,\nonAdd:b}){\n')
+    .replace('B.createElement(Uy,{variant:"outline",size:"sm"', 'B.createElement(\nUy,{\nvariant:"outline",\nsize:"sm"')
+    .replace('})({autonomousMode:', '})\n({\nautonomousMode:')
+    .replace('optimisticState:d,trueState:f}=$7a(a);', 'optimisticState:d,\ntrueState:f}=$7a(a);')
+    .replace('I.TokenType={UNSPECIFIED:0,SYSTEM_PROMPT:1,', 'I.TokenType={\nUNSPECIFIED:0,\nSYSTEM_PROMPT:1,')
+    .replace('nw.createPortal(', 'nw.\ncreatePortal(')
+    .replace('getCascadeTrajectoryGeneratorMetadata(Wb(dia,{cascadeId:', 'getCascadeTrajectoryGeneratorMetadata(\nWb(dia,\n{cascadeId:')
+    .replace('E1a={startIndex:-50},F1a={startIndex:-1},G1a={startIndex:0,endIndexExclusive:0}', 'E1a={startIndex:-50},\nF1a={startIndex:\n-1},\nG1a={startIndex:0,\nendIndexExclusive:0}');
+
+  const { output, results } = applyPatches(wrapped, { flags: FLAGS });
+  assert.equal(results.length, 5);
+  assert.equal(results[1].id, 'mendel-service-wrapper');
+  assert.equal(results[4].mode, 'enhanced');
+  assert.ok(output.includes('__AgyContextIndicator'));
+  assert.ok(output.includes('F1a={startIndex:\n0}'));
+  assert.doesNotThrow(() => verifyJsSyntax(output));
+
+  // flexRe must preserve spaces inside quoted literals verbatim while expanding outer spaces,
+  // and must not confuse escaped `\[` with a character class `[...]` later in the pattern.
+  const quoted = flexRe(String.raw`console \. error \( "Failed to fetch" , d \)`);
+  assert.equal(quoted.test('console.\nerror("Failed to fetch",\nd)'), true);
+  assert.equal(quoted.test('console.error("Failedtofetch",d)'), false);
+  const escapedBracket = flexRe(String.raw`var\s+c = \[ \] , x = [A-Za-z0-9_$]+ \( a \)`);
+  assert.equal(escapedBracket.test('var c=[\n],x=\nfoo(a)'), true);
 });
 
 test('R2-11: scanner refuses the documented silent-swallow counterexample', () => {

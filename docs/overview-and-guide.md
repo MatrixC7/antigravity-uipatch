@@ -50,12 +50,10 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 
 在隔离环境拉取 Google 原生账号的线上 `GetMendelFlags`（共下发 384 项实验配置，完整逐项状态见 [《实验特性开关全景目录》](custom-flags-catalog.md)）并与 `main.js` 比对可见：
 
-1. **`enable-aux-pane-redesign` 与 `enable-jetbox-terminal-v2` 线上状态均为 `ON`**：
-   - 当 **`enable-aux-pane-redesign` 开启**时（Google 原生账号与本工具的开箱默认形态），右侧栏运行在新版 `sidePanelV2` 多标签页架构，由右上角 `+` 下拉菜单（`Open File` / `New Terminal` / `Browser` / `Extensions`）与 `Overview` 总览面板（其 `Files` 行自带工作区侧边文件树）承载交互。
+1. **`enable-aux-pane-redesign` 与 `enable-jetbox-terminal-v2` 线上状态均为 `ON`（`2.35` 起已转正为默认常驻）**：
+   - 在 `2.31`–`2.34` 中，当 **`enable-aux-pane-redesign` 开启**时（Google 原生账号与本工具的开箱默认形态），右侧栏运行在新版 `sidePanelV2` 多标签页架构，由右上角 `+` 下拉菜单（`Open File` / `New Terminal` / `Browser` / `Extensions`）与 `Overview` 总览面板（其 `Files` 行自带工作区侧边文件树）承载交互；自 **`2.35.0-1`** 起，上游已将 `enable-aux-pane-redesign` 与 `enable-jetbox-terminal-v2` 转正为默认硬编码启用，不再经由开关门控。
 2. **`enable-file-explorer-tab` 线上状态为 `OFF`（`disabled: true`）**：
-   - 当你在 `Settings -> Developer -> Custom Flags` 中手动将 **`enable-aux-pane-redesign` 拨为关闭**，并添加 **`enable-file-explorer-tab`** 后，右侧栏即切回经典的 `sidePanel` 架构，顶部直接常驻显示四个固定小图标（`Overview` / `File Explorer` / `Review` / `Terminal`）。
-
-应用本工具后，你可以在 `Settings -> Developer` 中随时自由切换这两种布局形态。
+   - 在 `2.31`–`2.34` 中，可在 `Settings -> Developer -> Custom Flags` 将 **`enable-aux-pane-redesign` 拨为关闭**并添加 **`enable-file-explorer-tab`** 切回经典的四图标栏；在 `2.35.0-1` 中多标签右侧栏已转正，但仍可按需手动开启 `enable-file-explorer-tab`（文件树标签）或 `enable-bottom-terminal-panel`（底部终端停靠）。
 
 ---
 
@@ -97,7 +95,7 @@ Antigravity 桌面端并非单一进程，而是由职责分离的**三层结构
 
 ## 2. 上下文容量与推理遥测面板（`Context & Inference Indicator`）读数指南与设计解惑
 
-在 `antigravity 2.30+ / 2.31` 外部发行版中，Google 将入口插槽 `buildBindings.contextUsageIndicator` 置为了 `void 0` 并剔除了原版组件代码。本工具挂载了增强指示器组件 `__AgyContextIndicator`，在输入框右下角提供上下文占用圆环与推理速率展示（同时自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 外观开关）。
+在 `antigravity 2.30+`（截至实测 `2.35.0-1` 仍如此）外部发行版中，Google 将入口插槽 `buildBindings.contextUsageIndicator` 置为了 `void 0` 并剔除了原版组件代码。本工具挂载了增强指示器组件 `__AgyContextIndicator`，在输入框右下角提供上下文占用圆环与推理速率展示（同时自动恢复 `Settings -> Appearance -> Chat Layout -> Context and Quota Indicator` 外观开关）。
 
 ### 2.1 面板结构一览与二维正交矩阵设计
 

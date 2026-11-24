@@ -908,19 +908,36 @@ function resolveUniqueIdentifier(js, regex, label) {
 }
 
 /**
- * Patch 1 (`Ola()` in 2.31): Pre-hydrate `jetski.developer.customFlagOverrides`
- * from Electron's `window.nativeStorage` (`~/.config/Antigravity/app_storage.json`)
- * before resolving `MendelExperimentProvider`'s primary fetch, and seed the
- * empirically verified Google Native OAuth baseline + `enable-developer-mode`
- * whenever `GetMendelFlags` returns empty `{}` (Enterprise Gateway mode). When
- * signed in with Google Native OAuth (`list.length > 0`), preserves the live
- * server table intact and only ensures `enable-developer-mode` is enabled.
+ * Compile a token-spaced structural RegExp where every unquoted ASCII space
+ * expands to optional Closure Compiler whitespace/line-wraps (`\s*`).
+ * Mandatory whitespace between keywords/identifiers must be written as `\s+`.
+ */
+export function flexRe(pattern, flags = '') {
+  return new RegExp(
+    pattern.replace(
+      /\\.|"(?:\\.|[^"\\])*"|\[(?:\\.|[^\]\\])*\]| /g,
+      (m) => (m === ' ' ? '\\s*' : m)
+    ),
+    flags
+  );
+}
+
+/**
+ * Patch 1 (`Ola()` in 2.31 / `zma()` in 2.35): Pre-hydrate
+ * `jetski.developer.customFlagOverrides` from Electron's `window.nativeStorage`
+ * (`~/.config/Antigravity/app_storage.json`) before resolving
+ * `MendelExperimentProvider`'s primary fetch, and seed the empirically verified
+ * Google Native OAuth baseline + `enable-developer-mode` whenever
+ * `GetMendelFlags` returns empty `{}` (Enterprise Gateway mode). When signed in
+ * with Google Native OAuth (`list.length > 0`), preserves the live server table
+ * intact and only ensures `enable-developer-mode` is enabled.
  */
 export const PATCH_MENDEL_BASELINE = {
   id: 'mendel-native-baseline',
   occurrences: 1,
-  anchor:
-    /async function ([A-Za-z0-9_$]+)\(a\)\{var b=e,c=e;try\{try\{let d=c\(await b\(a\.getMendelFlags\(([A-Za-z0-9_$]+)\(([A-Za-z0-9_$]+),\{\}\)\)\)\)\.experimentConfig\?\.experiments\?\?\[\];a=\{\};for\(let f of d\)f\.keyString&&\(a\[f\.keyString\]=f\);return a\}catch\(d\)\{c\(\),console\.error\("Failed to fetch Mendel flags",d\)\}\}finally\{b\(\)\}\}/,
+  anchor: flexRe(
+    String.raw`async\s+function\s+([A-Za-z0-9_$]+) \( a \) \{ var\s+b = e , c = e ; try \{ try \{ let\s+d = c \( await\s+b \( a \. getMendelFlags \( ([A-Za-z0-9_$]+) \( ([A-Za-z0-9_$]+) , \{ \} \) \) \) \) \. experimentConfig \?\. experiments \?\? \[ \] ; a = \{ \} ; for \( let\s+f\s+of\s+d \) f \. keyString && \( a \[ f \. keyString \] = f \) ; return\s+a \} catch \( d \) \{ c \( \) , console \. error \( "Failed to fetch Mendel flags" , d \) \} \} finally \{ b \( \) \} \}`
+  ),
   apply(
     js,
     {
@@ -933,7 +950,7 @@ export const PATCH_MENDEL_BASELINE = {
     const [fullMatch, fnName, pbCreate, reqSchema] = m;
     const expNs = resolveUniqueIdentifier(
       js,
-      /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.ExperimentWithVariantSchema\b/g,
+      flexRe(String.raw`(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+) \. ExperimentWithVariantSchema\b`, 'g'),
       'PATCH_MENDEL_BASELINE:ExperimentWithVariantSchema'
     );
     const allBools = Array.from(new Set([...boolFlags, ...flags]));
@@ -1040,8 +1057,9 @@ export const PATCH_MENDEL_BASELINE = {
 export const PATCH_MENDEL_SERVICE = {
   id: 'mendel-service-wrapper',
   occurrences: 1,
-  anchor:
-    /getMendelFlags:async\(\)=>\s*([A-Za-z0-9_$]+)\(async ([A-Za-z0-9_$]+)=>\{var ([A-Za-z0-9_$]+)=e,([A-Za-z0-9_$]+)=e;try\{let ([A-Za-z0-9_$]+)=\4\(await \3\(\2\.getMendelFlags\(([A-Za-z0-9_$]+)\(([A-Za-z0-9_$]+),\{\}\)\)\)\);return\{experimentConfig:\5\.experimentConfig\?\{experiments:\5\.experimentConfig\.experiments\}:void 0\}\}finally\{\3\(\)\}\}\)/,
+  anchor: flexRe(
+    String.raw`getMendelFlags : async \( \) => ([A-Za-z0-9_$]+) \( async\s+([A-Za-z0-9_$]+) => \{ var\s+([A-Za-z0-9_$]+) = e , ([A-Za-z0-9_$]+) = e ; try \{ let\s+([A-Za-z0-9_$]+) = \4 \( await\s+\3 \( \2 \. getMendelFlags \( ([A-Za-z0-9_$]+) \( ([A-Za-z0-9_$]+) , \{ \} \) \) \) \) ; return \{ experimentConfig : \5 \. experimentConfig \? \{ experiments : \5 \. experimentConfig \. experiments \} : void\s+0 \} \} finally \{ \3 \( \) \} \} \)`
+  ),
   apply(js) {
     const m = matchUnique(js, this.anchor, 'PATCH_MENDEL_SERVICE');
     const [fullMatch, wrapFn, clientParam, vVar, wVar, , pbCreate, reqSchema] = m;
@@ -1063,32 +1081,44 @@ export const PATCH_MENDEL_SERVICE = {
 export const PATCH_MENDEL_OVERRIDES = {
   id: 'mendel-local-overrides',
   occurrences: 1,
-  anchor: /function ([A-Za-z0-9_$]+)\(a,b\)\{return\(a=a\.experiments\[b\]\)\?!a\.disabled:!1\}/,
+  anchor: flexRe(
+    String.raw`function\s+([A-Za-z0-9_$]+) \( a , b \) \{ return \( a = a \. experiments \[ b \] \) \? ! a \. disabled : !1 \}`
+  ),
   apply(js) {
     const [syncFull, syncFn] = matchUnique(js, this.anchor, 'PATCH_MENDEL_OVERRIDES:syncBool');
     const [reactiveFull, mapFn] = matchUnique(
       js,
-      /c\|\|\(c=([A-Za-z0-9_$]+)\(a\.stateProvider,d=>\(d=d\[b\]\)\?!d\.disabled:!1\),a\.experimentEnabledProviders\.set\(b,c\)\);/,
+      flexRe(
+        String.raw`c \|\| \( c = ([A-Za-z0-9_$]+) \( a \. stateProvider , d => \( d = d \[ b \] \) \? ! d \. disabled : !1 \) , a \. experimentEnabledProviders \. set \( b , c \) \) ;`
+      ),
       'PATCH_MENDEL_OVERRIDES:reactiveBool'
     );
     const [syncPropFull, syncClass, pbCreate, ovrSchema] = matchUnique(
       js,
-      /this\.flagOverrideSync=new ([A-Za-z0-9_$]+)\(async b=>\{var c=e,d=e;try\{d\(await c\(this\.lsClient\.setMendelFlagOverrides\(([A-Za-z0-9_$]+)\(([A-Za-z0-9_$]+),\{overrides:b\}\)\)\)\)\}finally\{c\(\)\}\}\);/,
+      flexRe(
+        String.raw`this \. flagOverrideSync = new\s+([A-Za-z0-9_$]+) \( async\s+b => \{ var\s+c = e , d = e ; try \{ d \( await\s+c \( this \. lsClient \. setMendelFlagOverrides \( ([A-Za-z0-9_$]+) \( ([A-Za-z0-9_$]+) , \{ overrides : b \} \) \) \) \) \} finally \{ c \( \) \} \} \) ;`
+      ),
       'PATCH_MENDEL_OVERRIDES:flagOverrideSync'
     );
     const [disposeFull, stopPollFn] = matchUnique(
       js,
-      /dispose\(\)\{([A-Za-z0-9_$]+)\(this\);this\.stateProvider\.dispose\(\);/,
+      flexRe(
+        String.raw`dispose \( \) \{ ([A-Za-z0-9_$]+) \( this \) ; this \. stateProvider \. dispose \( \) ;`
+      ),
       'PATCH_MENDEL_OVERRIDES:providerDispose'
     );
     const [secFull, secFn, secHook] = matchUnique(
       js,
-      /var ([A-Za-z0-9_$]+)=a=>\(a=([A-Za-z0-9_$]+)\(a\)\)\?!a\.disabled:!1,(?=[A-Za-z0-9_$]+=\(a,b\)=>\{var c=\2\(a\))/,
+      flexRe(
+        String.raw`var\s+([A-Za-z0-9_$]+) = a => \( a = ([A-Za-z0-9_$]+) \( a \) \) \? ! a \. disabled : !1 , (?=[A-Za-z0-9_$]+ = \( a , b \) => \{ var\s+c = \2 \( a \))`
+      ),
       'PATCH_MENDEL_OVERRIDES:secondaryBool'
     );
     const [storageFull, storageInitFn] = matchUnique(
       js,
-      /async function ([A-Za-z0-9_$]+)\(a\)\{(?=var b=e,c=e;try\{if\(typeof window!=="undefined"&&window\.nativeStorage\)try\{let f=new [A-Za-z0-9_$]+\(window\.nativeStorage\);)/,
+      flexRe(
+        String.raw`async\s+function\s+([A-Za-z0-9_$]+) \( a \) \{ (?=var\s+b = e , c = e ; try \{ if \( typeof\s+window !== "undefined" && window \. nativeStorage \) try \{ let\s+f = new\s+[A-Za-z0-9_$]+ \( window \. nativeStorage \) ;)`
+      ),
       'PATCH_MENDEL_OVERRIDES:storageInit'
     );
 
@@ -1303,7 +1333,7 @@ function buildFlagPickerSource({ fnName, reactIdent, buttonIdent }) {
 export const PATCH_FLAG_PICKER = {
   id: 'flag-picker-scrollable',
   occurrences: 1,
-  anchor: /function ([A-Za-z0-9_$]+)\(\{suggestedFlags:a,onAdd:b\}\)\{/,
+  anchor: flexRe(String.raw`function\s+([A-Za-z0-9_$]+) \( \{ suggestedFlags : a , onAdd : b \} \) \{`),
   apply(js) {
     const m = matchUnique(js, this.anchor, 'PATCH_FLAG_PICKER');
     const fnName = m[1];
@@ -1327,12 +1357,12 @@ export const PATCH_FLAG_PICKER = {
 
     const reactIdent = resolveUniqueIdentifier(
       replacedRegion,
-      /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.createElement\(/g,
+      flexRe(String.raw`(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+) \. createElement \(`, 'g'),
       'PATCH_FLAG_PICKER:React'
     );
     const [, buttonIdent] = matchUnique(
       replacedRegion,
-      /\.createElement\(([A-Za-z0-9_$]+),\{variant:"outline",size:"sm"/,
+      flexRe(String.raw`\. createElement \( ([A-Za-z0-9_$]+) , \{ variant : "outline" , size : "sm"`),
       'PATCH_FLAG_PICKER:Button'
     );
 
@@ -2214,7 +2244,7 @@ function buildContextIndicatorSource({
 export const PATCH_CONTEXT_INDICATOR = {
   id: 'context-usage-indicator',
   occurrences: 1,
-  anchor: /\}\)\(\{autonomousMode:/,
+  anchor: flexRe(String.raw`\} \) \( \{ autonomousMode :`),
   apply(js, { indicatorMode = DEFAULT_INDICATOR_MODE } = {}) {
     if (!INDICATOR_MODES.has(indicatorMode)) {
       throw new PatchError(
@@ -2223,7 +2253,10 @@ export const PATCH_CONTEXT_INDICATOR = {
       );
     }
     const slotMatch = matchUnique(js, this.anchor, 'PATCH_CONTEXT_INDICATOR:buildBindings');
-    const objOpen = slotMatch.index + 3; // points to `{` in `})({autonomousMode:`
+    const objOpen = js.indexOf('{', slotMatch.index); // points to `{` in `})({autonomousMode:`
+    if (objOpen === -1 || objOpen >= slotMatch.index + slotMatch[0].length) {
+      throw new PatchError('PATCH_CONTEXT_INDICATOR: missing opening brace for buildBindings', 3);
+    }
     const { valueStart, valueEnd } = findTopLevelObjectProperty(
       js,
       objOpen,
@@ -2250,37 +2283,48 @@ export const PATCH_CONTEXT_INDICATOR = {
     try {
       const [, useConvStateSym] = matchUnique(
         js,
-        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)=\(a,b\)=>\{var c=\[\],\{optimisticState:d,trueState:f\}=[A-Za-z0-9_$]+\(a\);/,
+        flexRe(
+          String.raw`(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+) = \( a , b \) => \{ var\s+c = \[ \] , \{ optimisticState : d , trueState : f \} = [A-Za-z0-9_$]+ \( a \) ;`
+        ),
         'PATCH_CONTEXT_INDICATOR:useConvState'
       );
       const cortexNs = resolveUniqueIdentifier(
         js,
-        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.TokenType=\{UNSPECIFIED:0,SYSTEM_PROMPT:1,/g,
+        flexRe(
+          String.raw`(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+) \. TokenType = \{ UNSPECIFIED : 0 , SYSTEM_PROMPT : 1 ,`,
+          'g'
+        ),
         'PATCH_CONTEXT_INDICATOR:TokenType'
       );
       const reactIdent = resolveUniqueIdentifier(
         js,
-        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.createElement\([A-Za-z0-9_$]+,\{conversationId:[A-Za-z0-9_$]+\}\)/g,
+        flexRe(
+          String.raw`(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+) \. createElement \( [A-Za-z0-9_$]+ , \{ conversationId : [A-Za-z0-9_$]+ \} \)`,
+          'g'
+        ),
         'PATCH_CONTEXT_INDICATOR:React'
       );
       const portalNs = resolveUniqueIdentifier(
         js,
-        /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+)\.createPortal\(/g,
+        flexRe(String.raw`(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+) \. createPortal \(`, 'g'),
         'PATCH_CONTEXT_INDICATOR:ReactDOM'
       );
       const [, pbCreateGen, genMetaReqSchema] = matchUnique(
         js,
-        /\.getCascadeTrajectoryGeneratorMetadata\(([A-Za-z0-9_$]+)\(([A-Za-z0-9_$]+),\{cascadeId:/,
+        flexRe(
+          String.raw`\. getCascadeTrajectoryGeneratorMetadata \( ([A-Za-z0-9_$]+) \( ([A-Za-z0-9_$]+) , \{ cascadeId :`
+        ),
         'PATCH_CONTEXT_INDICATOR:GetGeneratorMetadataRpc'
       );
-      const alreadyFullGenSlice =
-        /(?<![A-Za-z0-9_$])[A-Za-z0-9_$]+=\{startIndex:-\d+\},[A-Za-z0-9_$]+=\{startIndex:0\},[A-Za-z0-9_$]+=\{startIndex:0,endIndexExclusive:0\}/.test(
-          js
-        );
+      const alreadyFullGenSlice = flexRe(
+        String.raw`(?<![A-Za-z0-9_$])[A-Za-z0-9_$]+ = \{ startIndex : -\d+ \} , [A-Za-z0-9_$]+ = \{ startIndex : 0 \} , [A-Za-z0-9_$]+ = \{ startIndex : 0 , endIndexExclusive : 0 \}`
+      ).test(js);
       if (!alreadyFullGenSlice) {
         const gm = matchUnique(
           js,
-          /(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+=\{startIndex:-\d+\},[A-Za-z0-9_$]+=\{startIndex:)-1(\},[A-Za-z0-9_$]+=\{startIndex:0,endIndexExclusive:0\})/,
+          flexRe(
+            String.raw`(?<![A-Za-z0-9_$])([A-Za-z0-9_$]+ = \{ startIndex : -\d+ \} , [A-Za-z0-9_$]+ = \{ startIndex : )-1( \} , [A-Za-z0-9_$]+ = \{ startIndex : 0 , endIndexExclusive : 0 \})`
+          ),
           'PATCH_CONTEXT_INDICATOR:GeneratorMetadatasSlice'
         );
         genSliceEdit = {

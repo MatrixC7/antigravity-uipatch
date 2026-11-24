@@ -6,7 +6,7 @@
 
 ## 核心功能
 
-- **补齐企业网关模式缺失界面**：未登录 Google OAuth（启用 `gateway.enabled: true`）时自动注入 Google 原生账号默认功能集，直接恢复右上角 `Extensions`、内置 `Terminal`、多标签右侧栏、Git Diff 审查、PDF / Notebook 预览等 40 余项被空实验表隐藏的原生界面。
+- **补齐企业网关模式缺失界面**：未登录 Google OAuth（启用 `gateway.enabled: true`）时自动注入 Google 原生账号默认功能集，恢复右上角 `Extensions`、Git Diff 审查、PDF / Notebook 预览、内置浏览器、快捷键自定义、生成式 UI 等受实验表门控的原生界面（在 `2.31`–`2.34` 等旧版中亦一并恢复内置 `Terminal` 与多标签右侧栏）。
 - **开放 `Settings -> Developer` 并跨升级持久化**：任意登录模式下均可打开实验特性控制面板，修复原版候选框在 Chromium 下白底且无法滚动的问题；所有开关微调实时生效并保存在 `~/.config/Antigravity/app_storage.json`，重启与升级软件包均不丢失。
 - **新增上下文用量与输出速率指示器**：在输入框右下角添加圆环百分比按钮，点击即可查看上下文构成明细，以及最近一轮（`Last Turn`）与整场对话（`Σ Session`）的输入/输出 Token 用量、缓存命中率、吞吐速率、首字延迟与耗时统计（右上角支持通过 `t/s [Off | Turn | Avg]` 切换底栏速率显示）：
   ```text
@@ -37,8 +37,8 @@
 
 ## 版本要求与兼容性
 
-- **当前 `main` 分支适用范围**：`antigravity >= 2.31.0`（Linux x86-64）。补丁基于语法结构匹配，上游未重构相关前端逻辑的后续版本均可直接使用；若未来版本发生不兼容变动，旧版脚本将归档至仓库 Tags，`main` 则跟进新版。
-- **未测中间版本与旧版说明**：由于并未对上游每个小版本逐一实测，当两次实测版本之间出现过前端变动时，无法精确标定变动始于哪个具体版本号。**实际可用性可直接以本机运行 `self-test`（纯只读、零修改）的结果为准**：自检通过即可安全安装；若因客户端版本较旧导致自检不通过，请在仓库 Tags 中切换至接近的历史标签后再试。
+- **当前 `main` 分支适用范围**：`antigravity >= 2.31.0`（Linux x86-64，已实测覆盖 **`2.31.0-1` 至 `2.35.0-1` / `CL 1028447422`**）。补丁基于容忍折行的语法结构匹配，自动适配 Closure Compiler 标识符重命名与词法边界换行，上游未重构相关前端逻辑的后续版本均可直接使用；若未来版本发生不兼容变动，旧版脚本将归档至仓库 Tags，`main` 则跟进新版。
+- **未测中间版本与旧版说明**：由于并未对上游每个小版本逐一实测，当两次实测版本之间出现过前端变动时，无法精确标定变动始于哪个具体版本号。**实际可用性可直接以本机运行 `self-test`（纯只读、零修改）的结果为准**：自检通过即可安全安装；若因客户端版本较旧导致自检不通过，请在仓库 Tags 中切换至接近的历史标签（如 `v2.29`、`v2.31`、`v2.31-ctxui`）后再试。
 - **运行环境**：Node.js `>= 18`（仅使用内置标准库，无第三方依赖）
 
 ---
@@ -114,7 +114,7 @@ sudo node ~/antigravity-uipatch/antigravity_uipatch.mjs restore --user "$USER"
 | 文档 | 内容概要 |
 |---|---|
 | **[《原理与使用指南》](docs/overview-and-guide.md)** | 三层架构通俗导读、**上下文与输出速率指示器各指标定义与实机现象问答**（完成态快照、Prefix KV 缓存分母、`TTFT` 与上下文长度、工具调用突发 `Out speed`、双列表懒加载） |
-| **[《实验特性开关全景目录》](docs/custom-flags-catalog.md)** | 全部 **107 项 `customFlag`** 与 **23 个直读实验键**的线上基线状态、推荐加分项与避坑提醒 |
+| **[《实验特性开关全景目录》](docs/custom-flags-catalog.md)** | `2.35.0-1` 全部 **106 项 `customFlag`** 与 **23 个直读实验键**的线上基线状态、推荐加分项与避坑提醒 |
 | **[《CLI 命令参考、安全机制与支持契约》](docs/cli-and-support-scope.md)** | 全部子命令与全局选项、验证与扫描工具（`verify_live.mjs` / `inspect_flags.mjs` / 离线单测套件）、安全边界与退出码契约 |
 | **[《补丁架构与脚本实现详解》](docs/patch-internals.md)** | 尾部追加式无损 ASAR 打包、内嵌 ZIP 解析、`main.js` 五处结构化汇聚点补丁与 `language_server` 遥测逆向细节 |
 | **[《Mendel 门控取证报告》](docs/mechanism-mendel-gating.md)** | 前端三轨门控调用链、Google OAuth 384 项线上快照对比、8 条候选注入路径实测与 Electron Fuses 分析 |
@@ -128,7 +128,7 @@ sudo node ~/antigravity-uipatch/antigravity_uipatch.mjs restore --user "$USER"
 - **[`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock)**：解除 Antigravity 桌面端 `language_server` 在 Google OAuth 原生通道下的 256K 本地上下文自动压缩限制。
 - **[`agy-context-unlock`](https://github.com/MatrixC7/agy-context-unlock)**：解除命令行工具 `antigravity-cli`（`/usr/bin/agy`）的 256K 本地上下文压缩限制并恢复 `/model` 与 `settings.json` 持久化闭环。
 
-在机制逆向、全路径实测取证、零依赖脚本实现、多轮评审迭代、自动化测试与中文技术文档撰写中，主要工作由以下大语言模型协作完成：**Gemini 4 Carbon**、**DeepSeek V4.1 Flash 1017** 与 **GPT 6 Astra**；仓库维护者提供了问题定义、实机网关测试环境与架构取舍决策。谨致谢意。
+在机制逆向、全路径实测取证、零依赖脚本实现、多轮评审迭代、自动化测试与中文技术文档撰写中，主要工作由以下大语言模型协作完成：**Gemini 4 Carbon**、**Gemini 4 Neon**、**DeepSeek V4.1 Flash 1017** 与 **GPT 6 Astra**；仓库维护者提供了问题定义、实机网关测试环境与架构取舍决策。谨致谢意。
 
 ---
 

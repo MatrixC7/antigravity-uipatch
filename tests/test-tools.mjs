@@ -61,3 +61,41 @@ test('parseFrontendFlags extracts customFlag literals, decorator params, include
     ]
   );
 });
+
+test('parseFrontendFlags resolves Closure-minified Mendel readers across line wraps', () => {
+  const sample = `
+    function qj(a,b){return(a=a.experiments[b])?\n!a.disabled:!1}
+    function rj(a,b){var c=a.experimentEnabledProviders.\nget(b);return c}
+    function sj(a){var b=oj(),\nc=b.experimentStringProviders.get(a);return c}
+    var dcd=a=>{\nvar b=rj(oj(),a);return b};
+    var TZ=a=>(a=nbc(a))?\n!a.disabled:!1,\nUZ=(a,b)=>{\nvar c=nbc(a);return b};
+    const u1 = qj(x, "enable-developer-mode");
+    const u2 = rj(x, "enable-ui-sidecars");
+    const u3 = dcd("deprecate-workflows");
+    const u4 = TZ("jetski-generative-ui");
+    const u5 = UZ("max-best-of-n", 8);
+    const u6 = sj("agy-hub-announcement-message");
+  `;
+
+  const { mendel, symbols } = parseFrontendFlags(sample);
+  assert.deepEqual(symbols, {
+    reactSym: 'rj',
+    hookSym: 'dcd',
+    syncSym: 'qj',
+    secBoolSym: 'TZ',
+    secIntSym: 'UZ',
+    strSym: 'sj',
+  });
+  assert.equal(mendel.length, 6);
+  assert.deepEqual(
+    mendel.map((m) => m.flag).sort(),
+    [
+      'agy-hub-announcement-message',
+      'deprecate-workflows',
+      'enable-developer-mode',
+      'enable-ui-sidecars',
+      'jetski-generative-ui',
+      'max-best-of-n',
+    ]
+  );
+});

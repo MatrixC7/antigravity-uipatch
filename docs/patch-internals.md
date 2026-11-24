@@ -6,11 +6,11 @@
 
 ## 1. 设计目标与工程约束
 
-Antigravity 桌面端的界面控制逻辑位于 `language_server` 二进制内嵌的 `agy_hub_web_bundle` ZIP 归档（核心为约 11.9 MB 的压缩编译产物 `main.js`），而子进程启动参数则位于 `/opt/Antigravity/resources/app.asar` 的 `dist/languageServer.js` 中。为兼顾安全性、可维护性与多工具共存，`antigravity_uipatch.mjs` 遵循四项核心工程约束：
+Antigravity 桌面端的界面控制逻辑位于 `language_server` 二进制内嵌的 `agy_hub_web_bundle` ZIP 归档（核心为约 11.9–12.8 MB 的压缩编译产物 `main.js`），而子进程启动参数则位于 `/opt/Antigravity/resources/app.asar` 的 `dist/languageServer.js` 中。为兼顾安全性、可维护性与多工具共存，`antigravity_uipatch.mjs` 遵循四项核心工程约束：
 
 1. **零外部依赖（纯 Node.js 标准库）**：完全基于 `node:fs`、`node:zlib`、`node:crypto`、`node:vm` 等内置模块实现 ASAR 归档打包、ZIP 中央目录解析、DEFLATE 解压、IEEE 802.3 CRC32 校验与 JavaScript 语法树预检，不依赖任何第三方 npm 包，也不依赖外部 `/usr/bin/unzip` 或 `@electron/asar` CLI。
 2. **字节级无损往返（Byte-Identical Round-Trip）**：对 `app.asar` 采用**原数据区零移动、仅尾部追加修改项**的打包算法。当替换映射为空时，`repack()` 直接返回原缓冲区（任意合法输入逐字节 100% 一致）；修改单一条目（`dist/languageServer.js`）时，原厂其余 `1,111` 个文件条目及任何前序第三方归档补丁的偏移量与字节流均分毫不差地原样保留。
-3. **结构化唯一签名匹配、故障闭合（Fail-Closed）与 V8 语法预检**：由于上游每次构建均由 Closure Compiler 重新分配短标识符名（如 `2.29` → `2.31` 中 `fka` → `Ola`、`mtb` → `EGb`、`A` → `B`），全部 5 处前端主锚点与子锚点均采用**基于不变方法名/字符串字面量与语法骨架的结构化正则**（配合负向回顾断言 `(?<![A-Za-z0-9_$])` 完整兼容 `$` 前缀压缩符号）动态捕获符号名，并强制断言全文件唯一匹配（`matches.length === 1`）；合成后的完整 `main.js` 必须通过 `new vm.Script(output)` 的 V8 引擎语法解析校验，才会进入 `app.asar` 改写与正式目录原子切换阶段。
+3. **结构化唯一签名匹配、故障闭合（Fail-Closed）与 V8 语法预检**：由于上游每次构建均由 Closure Compiler 重新分配短标识符名（如 `2.29` → `2.31` → `2.35` 中 `fka` → `Ola` → `zma`、`mtb` → `EGb` → `nUb`、`A` → `B` → `E`）并在约每 500 列处插入任意 Token 边界折行（`\n`），全部 5 处前端主锚点与子锚点（以及 `tools/inspect_flags.mjs` 的读取器识别正则）均经 `flexRe()` 构造为**容忍词法边界折行且基于不变方法名/字面量与语法骨架的结构化正则**（配合负向回顾断言 `(?<![A-Za-z0-9_$])` 完整兼容 `$` 前缀压缩符号）动态捕获符号名，并强制断言全文件唯一匹配（`matches.length === 1`）；合成后的完整 `main.js` 必须通过 `new vm.Script(output)` 的 V8 引擎语法解析校验，才会进入 `app.asar` 改写与正式目录原子切换阶段。
 4. **绝不触碰 `language_server` 二进制**：仅以只读方式扫描内存缓冲区提取内嵌 Web UI，确保与修改 Go 二进制机器码的 [`antigravity-context-unlock`](https://github.com/MatrixC7/antigravity-context-unlock) 正交共存。
 
 ---
@@ -105,7 +105,7 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 ## 4. `main.js` 五处结构化前端汇聚点补丁详解
 
-在提取出的 `548` 个归档条目（`540` 个文件 + `8` 个目录）中，除 `main.js` 外的其余 `539` 个文件保持原厂字节不变，仅对核心包 `main.js`（`2.31.0-1` 原版 `11,871,831` 字节 → 修补后 `11,917,108` 字节）施加以下 **5 处结构化唯一锚点补丁**（以下括号内符号以 `CL 1017595969` 构建为例，实际运行期均由 `matchUnique()` / `resolveUniqueIdentifier()` 自动从语法结构捕获）：
+在提取出的 `548` 个归档条目（`540` 个文件 + `8` 个目录）中，除 `main.js` 外的其余 `539` 个文件保持原厂字节不变，仅对核心包 `main.js`（`2.31.0-1` 为 `11,871,831` → `11,917,108` 字节；`2.35.0-1` / `CL 1028447422` 为 `12,798,818` → `12,844,094` 字节）施加以下 **5 处结构化唯一锚点补丁**（以下括号内符号以 `2.31.0-1` / `CL 1017595969` 构建为例，实际运行期均经 `flexRe()` 与 `matchUnique()` / `resolveUniqueIdentifier()` 自动捕获并容忍折行）：
 
 ### 4.1 补丁 1：`mendel-native-baseline`（`Ola()` 启动预热 + Google 原生基线回退）
 
@@ -130,7 +130,7 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 
 前端除 `MendelExperimentProvider` 外，还存在一套供 `IT(flag)` 与 `JT(flag, defaultInt)` 钩子（如内联生成式 UI 开关 `jetski-generative-ui`、浏览器子代理 `enable-browser-subagent-v2`、附件上限 `max-media-attachments` 等）使用的次级 `getMendelFlags` 包装器。
 
-`PATCH_MENDEL_SERVICE` 为该包装器补齐了内部 `try/catch` 异常捕获（记录布尔标志 `ok`），并将返回值统一改写为 `__agyNormalizeMendel(__agyResolveExperiments(ok ? x : void 0))`。因此，**主通道与次级通道完全共用同一份 `__agyLastGood` 缓存、同一套“成功空表清缓存 / 失败保留上次可用表”策略以及同一份静态基线**。
+`PATCH_MENDEL_SERVICE` 通过 `flexRe()` 容忍 Closure Compiler 在 `experimentConfig?\n{experiments:` 等任意词法边界插入的折行，为该包装器补齐了内部 `try/catch` 异常捕获（记录布尔标志 `ok`），并将返回值统一改写为 `__agyNormalizeMendel(__agyResolveExperiments(ok ? x : void 0))`。因此，**主通道与次级通道完全共用同一份 `__agyLastGood` 缓存、同一套“成功空表清缓存 / 失败保留上次可用表”策略以及同一份静态基线**。
 
 ### 4.3 补丁 3：`mendel-local-overrides`（全通道双向覆盖响应 + `clientStorageFeature` 实时绑定）
 
@@ -173,7 +173,7 @@ Electron 的 `app.asar` 采用 Chromium Pickle 封装的定长前导头 + JSON �
 `PATCH_CONTEXT_INDICATOR` 采用 **100% 洁净室原创代码**（不拷贝 `2.29` 任何闭源字节），由三部分组成：
 
 1. **顶层键值扫描与三模式升级策略（`--indicator-mode`）**：
-   - 通过 `findTopLevelObjectProperty()` 在 `buildBindings` 对象字面量内精确定位顶层唯一 `contextUsageIndicator:` 属性的值区间（扫描至该属性值结束即立刻返回，避开后方字母序属性 `getAppVariant` 函数体内的正则字面量；同时避开偏移 `9.35M–11.1M` 处内嵌 ElkJS/GWT 闭包内的局部同名短符号）；
+   - 通过 `js.indexOf('{', slotMatch.index)` 动态定位 `buildBindings` 对象起始花括号（避免 `})\n({autonomousMode:` 折行造成定长偏移错位），再由 `findTopLevelObjectProperty()` 精确定位顶层唯一 `contextUsageIndicator:` 属性的值区间（扫描至该属性值结束即立刻返回，避开后方字母序属性 `getAppVariant` 函数体内的正则字面量；同时避开内嵌 ElkJS/GWT 闭包内的局部同名短符号）；
    - 默认 **`custom` 模式**：无论上游为 `void 0` 还是简单原生实现均挂载增强组件 `__AgyContextIndicator`；若未来某版上游**同时**恢复非空原生实现并重构了内部会话 Hook，脚本自动安全退让保留上游原生实现（`native-fallback`），绝不阻断 `pacman -Syu` 同步；若上游仍为 `void 0` 而锚点失配，则严格以退出码 `3` 故障闭合中止；
    - 另支持 **`polyfill` 模式**（仅在 `void 0` 时注入，上游有原生实现时直接旁路）与 **`stock` 模式**（保持原厂不变）。
 

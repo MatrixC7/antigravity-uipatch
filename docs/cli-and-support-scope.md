@@ -104,7 +104,7 @@ node antigravity_uipatch.mjs verify
 
 ### 2.2 内嵌实验开关全景静态扫描（`tools/inspect_flags.mjs`）
 
-无需解压落盘，直接从 `language_server` 内存提取 `main.js`、自动解析当前构建压缩后的读取器符号，列出全部 **107 个 `customFlag` 门控关系**与 **27 处直读 / 次级 Mendel 调用点（去重后为 24 组 `reader+key` 组合，覆盖 23 个唯一实验键）**（耗时约 `0.1s`）：
+无需解压落盘，直接从 `language_server` 内存提取 `main.js`、经 `flexRe()` 自动解析当前构建压缩后的读取器符号，列出本机客户端的全部 `customFlag` 门控关系与直读 / 次级 Mendel 调用点（以 `2.35.0-1` 为例：共 **106 个 `customFlag`** 与 **28 处直读 / 次级 Mendel 字面量调用点，按 `reader+key` 去重后为 25 组、覆盖 23 个唯一实验键**；耗时约 `0.1s`）：
 
 ```bash
 node tools/inspect_flags.mjs
@@ -122,7 +122,7 @@ node verify_live.mjs
 
 ### 2.4 离线单元测试套件
 
-包含 **38 项自动化测试**（`37` 项核心单元与回归测试 + `1` 项扫描工具测试：涵盖合成与真实 `app.asar` 逐字节往返一致性、单条目替换隔离性、ASAR `link` 节点容错、备份配对判定与坏备份拒绝、STORE/DEFLATE ZIP 解压与单比特 CRC32 损坏拦截、EOCD 诱饵与中央目录边界校验、路径穿越与规范化名冲突拦截、双 ZIP 时区归档排除、全部 5 处结构化前端补丁与 V8 语法校验、Closure 压缩符号含 `$` 前缀重命名自适应测试、结构扫描器 fail-closed 断言、VM 沙盒验证 Google 原生基线与双向覆盖语义、主/次双通道共享成功空表清缓存与错误保留 last-known-good、`clientStorageFeature` + `nativeStorage` 跨随机端口持久化与 hydrate 失败重试、上下文指示器 `TokenType` 细分 / 压缩后近似 / `Last Turn` 与 `Σ Session · N turns` 双 `4×2` 正交指标 / 真实缓存总输入分母 / `PROD_UI` 步骤 `createdAt` 时间戳回退 / 流式期间快照稳定 / 原生 `h-7` 胶囊尺寸与 `t/s [Off | Turn | Avg]` 三段式底栏切换持久化及三模式自适应策略、解耦 RPC 队列的本地即时通知与 `dispose` 注销、UI 提交状态机双失败保护、`resolveWriteRoot` 与符号链接隔离策略，以及 `.desktop` `Exec=` 只读解析器的 `GKeyFile`+`Exec` 双层反转义、`env` 选项解析与程序后诱饵参数隔离）：
+包含 **40 项自动化测试**（`38` 项核心单元与回归测试 + `2` 项扫描工具测试：涵盖合成与真实 `app.asar` 逐字节往返一致性、单条目替换隔离性、ASAR `link` 节点容错、备份配对判定与坏备份拒绝、STORE/DEFLATE ZIP 解压与单比特 CRC32 损坏拦截、EOCD 诱饵与中央目录边界校验、路径穿越与规范化名冲突拦截、双 ZIP 时区归档排除、全部 5 处结构化前端补丁与 V8 语法校验、Closure 压缩符号含 `$` 前缀重命名及 500 列词法边界折行（`\n`）自适应测试、结构扫描器 fail-closed 断言、VM 沙盒验证 Google 原生基线与双向覆盖语义、主/次双通道共享成功空表清缓存与错误保留 last-known-good、`clientStorageFeature` + `nativeStorage` 跨随机端口持久化与 hydrate 失败重试、上下文指示器 `TokenType` 细分 / 压缩后近似 / `Last Turn` 与 `Σ Session · N turns` 双 `4×2` 正交指标 / 真实缓存总输入分母 / `PROD_UI` 步骤 `createdAt` 时间戳回退 / 流式期间快照稳定 / 原生 `h-7` 胶囊尺寸与 `t/s [Off | Turn | Avg]` 三段式底栏切换持久化及三模式自适应策略、解耦 RPC 队列的本地即时通知与 `dispose` 注销、UI 提交状态机双失败保护、`resolveWriteRoot` 与符号链接隔离策略，以及 `.desktop` `Exec=` 只读解析器的 `GKeyFile`+`Exec` 双层反转义、`env` 选项解析与程序后诱饵参数隔离）：
 
 ```bash
 node --test tests/
@@ -145,7 +145,7 @@ node --test tests/
 
 ### 3.2 已知运行边界
 
-1. **前端入口解锁不替代云端专有服务或其余已被编译期剥离的专有组件**：部分 Google 内部专用开关（CitC、ABFS、Critique 等）因缺少云端后端权限无法工作；`2.31.0-1` 外部包中被置为 `buildBindings: void 0` 的三项组件里，**`contextUsageIndicator` 已由本工具挂载增强组件完整恢复**，其余两项（`enable-code-search-palette` 与 `enable-enhanced-file-viewer`）因无实现代码仍不会生效。
+1. **前端入口解锁不替代云端专有服务或其余已被编译期剥离的专有组件**：部分 Google 内部专用开关（CitC、ABFS、Critique 等）因缺少云端后端权限无法工作；在 `2.30+`（截至实测 `2.35.0-1`）外部包中被置为 `buildBindings: void 0` 的三项组件里，**`contextUsageIndicator` 已由本工具挂载增强组件完整恢复**，其余两项（`enable-code-search-palette` 与 `enable-enhanced-file-viewer`）因无实现代码仍不会生效。
 2. **请勿在启用状态下直接删除外置 UI 目录**：当启动环境仍带有 `AGY_UI_BUNDLE` 时，若手动删空 `~/.local/share/antigravity-externalui`，`language_server` 会因目录缺失返回 `HTTP 500`。清理目录前请先移除环境变量或运行 `restore`。
 3. **多 Hook 的执行顺序与还原边界**：本工具采用尾部追加式重打包，因此与其他修改 `app.asar` 的 Hook 在其之后运行时可无损共存。但若在本工具之后又有第三方工具改写了别的条目，`restore` 的字节级配对会判定失配并拒绝还原（保护行为）——此时请重装 `antigravity` 后再 `install`。
 4. **`verify` 的校验范围与实时进程提示**：`verify` 强制校验 `app.asar` 钩子、配对备份与外置 UI 包完整性（若 `.desktop` 中显式配置了 `AGY_UI_BUNDLE`，同时校验该路径可达；未配置 `.desktop` 不视为错误）；若后台已有旧 `language_server` 进程在运行，`live proc` 行会显示当前进程是否已挂载 `--web_bundle_path`。
@@ -161,14 +161,14 @@ node --test tests/
 | 项目 | 状态 |
 |---|---|
 | 平台 | Linux x86-64（已实测验证） |
-| Antigravity | 当前 `main` 主线适用 `>= 2.31.0`（实测基线 `2.31.0-1` / `CL 1017595969`，Electron `44.9.1`；实际兼容性以只读 `self-test` 为准，旧版本请切换至仓库相近 Tag） |
+| Antigravity | 当前 `main` 主线适用 `>= 2.31.0`（已实测 `2.31.0-1` / `CL 1017595969` 至 `2.35.0-1` / `CL 1028447422`，Electron `44.9.1`；实际兼容性以只读 `self-test` 为准，旧版本请切换至仓库相近 Tag） |
 | Node.js | `>= 18`（仅使用内置标准库 API） |
 | 运行依赖 | 仅 Node.js 标准库，无第三方 npm 依赖 |
 
 ### 4.2 补丁对象与前端结构
 
 - 仅替换 ASAR 中的固定普通打包条目 `dist/languageServer.js`；绝不修改 `language_server` 二进制。
-- 5 处前端补丁依赖当前已验证的结构签名（自动捕获 Closure Compiler 重命名的局部变量与函数名）。若上游改动了目标函数的真实语法结构导致匹配数不为 `1`，工具会 fail-closed 退出（退出码 `3`）；唯一例外是当未来上游在 `buildBindings` 中已恢复非空原生 `contextUsageIndicator` 且同时重构了内部会话 Hook 时，默认 `custom` 模式会安全退让保留上游原生组件。
+- 5 处前端补丁经 `flexRe()` 依赖当前已验证的结构签名（自动捕获 Closure Compiler 重命名的局部变量与函数名，并容忍约 500 列处的任意词法边界换行）。若上游改动了目标函数的真实语法结构导致匹配数不为 `1`，工具会 fail-closed 退出（退出码 `3`）；唯一例外是当未来上游在 `buildBindings` 中已恢复非空原生 `contextUsageIndicator` 且同时重构了内部会话 Hook 时，默认 `custom` 模式会安全退让保留上游原生组件。
 - 底部开关选择器组件（`EGb()`）采用“严格结构扫描 + 嵌套 `function` 声明安全网”：遇到注释（`//`、`/*`）或无法明确判定为除法的 `/` 一律拒绝。该扫描器并非完整 JS 词法解析器，仅面向当前已验证的编译组件结构设计。
 
 ### 4.3 ASAR / ZIP 格式范围

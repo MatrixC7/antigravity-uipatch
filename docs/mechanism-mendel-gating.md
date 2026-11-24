@@ -1,6 +1,6 @@
 # 技术报告：Mendel 实验开关门控机制与本地注入路径实测取证
 
-> **取证对象**：Antigravity 桌面端应用 `2.31.0-1`（Electron `44.9.1`，`language_server` `Built at CL: 1017595969`，Linux x86-64；线上 OAuth 实验表基线首次采集自 `2.29.1-1` / `CL 1015941558` 并在 `2.31.0-1` 逐键复核）。
+> **取证对象**：Antigravity 桌面端应用 `2.31.0-1`（Electron `44.9.1`，`language_server` `Built at CL: 1017595969`，Linux x86-64；线上 OAuth 实验表基线首次采集自 `2.29.1-1` / `CL 1015941558` 并在 `2.31.0-1` 逐键复核；三轨门控架构与 Electron Fuse 结论在 `2.35.0-1` / `CL 1028447422` 下复核依然成立）。
 > **测试环境**：企业网关模式（`~/.gemini/config/config.json` 配置 `gateway.enabled: true`，`wireProtocol: "openai"`）、隔离 Google OAuth 原生账号沙盒实例与独立回环实例（`--standalone --gemini_dir <isolated>`）。
 > **通俗导读**：如需快速了解结论与日常用法，请参阅 [《原理与使用指南》](overview-and-guide.md)。
 

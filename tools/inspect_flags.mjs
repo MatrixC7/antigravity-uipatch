@@ -27,6 +27,7 @@ import { pathToFileURL } from 'node:url';
 import {
   DEFAULT_INSTALL_DIR,
   findWebBundleZip,
+  flexRe,
   readZipEntry,
 } from '../antigravity_uipatch.mjs';
 
@@ -89,22 +90,24 @@ export function parseFrontendFlags(js) {
   //    for minimal synthetic test snippets).
   const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const syncSym =
-    /function ([A-Za-z0-9_$]+)\(a,b\)\{return\(a=a\.experiments\[b\]\)\?!a\.disabled:!1\}/.exec(js)?.[1] ??
-    'jj';
+    flexRe(
+      String.raw`function\s+([A-Za-z0-9_$]+) \( a , b \) \{ return \( a = a \. experiments \[ b \] \) \? ! a \. disabled : !1 \}`
+    ).exec(js)?.[1] ?? 'jj';
   const reactSym =
-    /function ([A-Za-z0-9_$]+)\(a,b\)\{var c=a\.experimentEnabledProviders\.get\(b\);/.exec(js)?.[1] ??
-    'kj';
+    flexRe(
+      String.raw`function\s+([A-Za-z0-9_$]+) \( a , b \) \{ var\s+c = a \. experimentEnabledProviders \. get \( b \) ;`
+    ).exec(js)?.[1] ?? 'kj';
   const strSym =
-    /function ([A-Za-z0-9_$]+)\(a\)\{var b=[A-Za-z0-9_$]+\(\),c=b\.experimentStringProviders\.get\(a\);/.exec(
-      js
-    )?.[1] ?? 'mj';
+    flexRe(
+      String.raw`function\s+([A-Za-z0-9_$]+) \( a \) \{ var\s+b = [A-Za-z0-9_$]+ \( \) , c = b \. experimentStringProviders \. get \( a \) ;`
+    ).exec(js)?.[1] ?? 'mj';
   const hookSym =
-    new RegExp(`(?:var|const|let)\\s+([A-Za-z0-9_$]+)=a=>\\{var b=${escapeRe(reactSym)}\\(`).exec(js)?.[1] ??
-    'IX';
-  const secMatch =
-    /var ([A-Za-z0-9_$]+)=a=>\(a=([A-Za-z0-9_$]+)\(a\)\)\?!a\.disabled:!1,([A-Za-z0-9_$]+)=\(a,b\)=>\{var c=\2\(a\)/.exec(
-      js
-    );
+    flexRe(
+      String.raw`(?:var|const|let)\s+([A-Za-z0-9_$]+) = a => \{ var\s+b = ${escapeRe(reactSym)} \(`
+    ).exec(js)?.[1] ?? 'IX';
+  const secMatch = flexRe(
+    String.raw`var\s+([A-Za-z0-9_$]+) = a => \( a = ([A-Za-z0-9_$]+) \( a \) \) \? ! a \. disabled : !1 , ([A-Za-z0-9_$]+) = \( a , b \) => \{ var\s+c = \2 \( a \)`
+  ).exec(js);
   const secBoolSym = secMatch?.[1] ?? 'FS';
   const secIntSym = secMatch?.[3] ?? 'GS';
 
